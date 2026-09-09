@@ -1,0 +1,269 @@
+
+
+xcrash error:
+child terminated normally with non-zero exit status(102), dumper=/data/app/~~Rv3BTecgBZJiMol8OBrI0A==/edts.apm.android.verifier-lE8pJ2_cr8Zwip_nkfm9Pw==/lib/arm64/libxcrash_dumper.so
+
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Tombstone maker: 'xCrash 3.1.0'
+Crash type: 'native'
+Start time: '2026-09-08T17:13:03.489+0700'
+Crash time: '2026-09-08T17:13:19.338+0700'
+App ID: 'edts.apm.android.verifier'
+App version: '1.0'
+Rooted: 'No'
+API level: '33'
+OS version: '13'
+Kernel version: 'Linux version 5.15.119-android13-8-00034-gd34029c8258b-ab10871489 #1 SMP PREEMPT Wed Sep 27 18:42:24 UTC 2023 (aarch64)'
+ABI list: 'arm64-v8a'
+Manufacturer: 'Google'
+Brand: 'google'
+Model: 'sdk_gphone64_arm64'
+Build fingerprint: 'google/sdk_gphone64_arm64/emu64a:13/TE1A.240213.009/12342917:userdebug/dev-keys'
+ABI: 'arm64'
+pid: 7882, tid: 7882, name: ndroid.verifier  >>> edts.apm.android.verifier <<<
+signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0
+    x0  0000000000000000  x1  00000071fa60c6c0  x2  0000006f5a203658  x3  0000007fd64d3200
+    x4  00000000714f3de8  x5  0000006f5379f1a4  x6  0000007fd64d3250  x7  0000006f59ee6a70
+    x8  0000000000000000  x9  93e5094e4e17ffa5  x10 0000000000000050  x11 000000000000000d
+    x12 0000000000009a64  x13 e4c8176791e86395  x14 0000000000000006  x15 ffffffffffffffff
+    x16 0000000000000001  x17 0000006f3baf1640  x18 0000007216b8e000  x19 b4000070cb88e010
+    x20 0000000000000000  x21 0000000000000000  x22 0000007208eb1b3a  x23 0000000000000071
+    x24 0000006f59c00880  x25 0000007fd64d4740  x26 0000007fd64d4748  x27 0000007fd64d4740
+    x28 0000007fd64d4640  x29 0000007fd64d4620
+    sp  0000007fd64d45f0  lr  0000006f3baf1660  pc  0000006f3baf1678
+
+backtrace:
+    #00 pc 0000000000000678  /data/app/~~Rv3BTecgBZJiMol8OBrI0A==/edts.apm.android.verifier-lE8pJ2_cr8Zwip_nkfm9Pw==/base.apk!/lib/arm64-v8a/libapm_crash_trigger.so
+    #01 pc 0000000000000660  /data/app/~~Rv3BTecgBZJiMol8OBrI0A==/edts.apm.android.verifier-lE8pJ2_cr8Zwip_nkfm9Pw==/base.apk!/lib/arm64-v8a/libapm_crash_trigger.so (Java_edts_apm_android_verifier_NativeCrashTrigger_crashNow+32)
+    #02 pc 0000000000461d58  /apex/com.android.art/lib64/libart.so
+    #03 pc 000000000020939c  /apex/com.android.art/lib64/libart.so
+    #04 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #05 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #06 pc 000000000020b078  /apex/com.android.art/lib64/libart.so
+    #07 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #08 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #09 pc 000000000020b078  /apex/com.android.art/lib64/libart.so
+    #10 pc 000000000020a258  /apex/com.android.art/lib64/libart.so
+    #11 pc 000000000020a258  /apex/com.android.art/lib64/libart.so
+    #12 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #13 pc 000000000020b078  /apex/com.android.art/lib64/libart.so
+    #14 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #15 pc 000000000020a258  /apex/com.android.art/lib64/libart.so
+    #16 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #17 pc 0000000000209338  /apex/com.android.art/lib64/libart.so
+    #18 pc 0000000000458604  /apex/com.android.art/lib64/libart.so
+    #19 pc 000000000048b3a0  /apex/com.android.art/lib64/libart.so (_ZN3art12InvokeMethodILNS_11PointerSizeE8EEEP8_jobjectRKNS_33ScopedObjectAccessAlreadyRunnableES3_S3_S3_m+1564)
+    #20 pc 000000000048ad60  /apex/com.android.art/lib64/libart.so
+    #21 pc 000000000009914c  /system/framework/arm64/boot.oat
+
+logcat:
+--------- tail end of log main (/system/bin/logcat -b main -d -v threadtime -t 200 --pid 7882 *:D)
+--------- beginning of main
+09-08 17:13:19.331  7882  7882 D CompatibilityChangeReporter: Compat change id reported: 147798919; UID 10174; state: ENABLED
+--------- tail end of log system (/system/bin/logcat -b system -d -v threadtime -t 50 --pid 7882 *:W)
+--------- tail end of log events (/system/bin/logcat -b events -d -v threadtime -t 50 --pid 7882 *:I)
+--------- beginning of events
+09-08 17:13:03.420  7882  7882 I wm_on_create_called: [54675751,edts.apm.android.verifier.MainActivity,performCreate]
+09-08 17:13:03.420  7882  7882 I wm_on_start_called: [54675751,edts.apm.android.verifier.MainActivity,handleStartActivity]
+09-08 17:13:03.421  7882  7882 I wm_on_resume_called: [54675751,edts.apm.android.verifier.MainActivity,RESUME_ACTIVITY]
+09-08 17:13:03.436  7882  7882 I wm_on_top_resumed_gained_called: [54675751,edts.apm.android.verifier.MainActivity,topStateChangedWhenResumed]
+
+memory info:
+ System Summary (From: /proc/meminfo)
+  MemTotal:        2012188 kB
+  MemFree:          265508 kB
+  MemAvailable:     706864 kB
+  Buffers:            8476 kB
+  Cached:           711532 kB
+  SwapCached:        11896 kB
+  Active:           469628 kB
+  Inactive:         793284 kB
+  Active(anon):     193016 kB
+  Inactive(anon):   369260 kB
+  Active(file):     276612 kB
+  Inactive(file):   424024 kB
+  Unevictable:       10220 kB
+  Mlocked:           10220 kB
+  SwapTotal:       1509136 kB
+  SwapFree:        1073932 kB
+  Dirty:               244 kB
+  Writeback:             0 kB
+  AnonPages:        549880 kB
+  Mapped:           513956 kB
+  Shmem:              9868 kB
+  KReclaimable:      64876 kB
+  Slab:             193308 kB
+  SReclaimable:      64876 kB
+  SUnreclaim:       128432 kB
+  KernelStack:       32864 kB
+  ShadowCallStack:    8236 kB
+  PageTables:        68140 kB
+  NFS_Unstable:          0 kB
+  Bounce:                0 kB
+  WritebackTmp:          0 kB
+  CommitLimit:     2515228 kB
+  Committed_AS:   56196272 kB
+  VmallocTotal:   259653632 kB
+  VmallocUsed:       61516 kB
+  VmallocChunk:          0 kB
+  Percpu:             4304 kB
+  AnonHugePages:         0 kB
+  ShmemHugePages:        0 kB
+  ShmemPmdMapped:        0 kB
+  FileHugePages:         0 kB
+  FilePmdMapped:         0 kB
+  CmaTotal:          16384 kB
+  CmaFree:               0 kB
+-
+ Process Status (From: /proc/PID/status)
+  Name:	ndroid.verifier
+  Umask:	0077
+  State:	R (running)
+  Tgid:	7882
+  Ngid:	0
+  Pid:	7882
+  PPid:	303
+  TracerPid:	0
+  Uid:	10174	10174	10174	10174
+  Gid:	10174	10174	10174	10174
+  FDSize:	256
+  Groups:	3003 9997 20174 50174
+  VmPeak:	15281432 kB
+  VmSize:	14909852 kB
+  VmLck:	       0 kB
+  VmPin:	       0 kB
+  VmHWM:	  136804 kB
+  VmRSS:	  136804 kB
+  RssAnon:	   51924 kB
+  RssFile:	   83992 kB
+  RssShmem:	     888 kB
+  VmData:	 1114732 kB
+  VmStk:	    8192 kB
+  VmExe:	       4 kB
+  VmLib:	  134404 kB
+  VmPTE:	    1176 kB
+  VmSwap:	   17960 kB
+  CoreDumping:	0
+  THP_enabled:	1
+  Threads:	28
+  SigQ:	0/7779
+  SigPnd:	0000000000000000
+  ShdPnd:	0000000000000000
+  SigBlk:	7fffff00fffbfeff
+  SigIgn:	0000000000000001
+  SigCgt:	0000006e400084f8
+  CapInh:	0000000000000000
+  CapPrm:	0000000000000000
+  CapEff:	0000000000000000
+  CapBnd:	0000000000000000
+  CapAmb:	0000000000000000
+  NoNewPrivs:	0
+  Seccomp:	2
+  Seccomp_filters:	1
+  Speculation_Store_Bypass:	thread vulnerable
+  SpeculationIndirectBranch:	unknown
+  Cpus_allowed:	f
+  Cpus_allowed_list:	0-3
+  Mems_allowed:	1
+  Mems_allowed_list:	0
+  voluntary_ctxt_switches:	287
+  nonvoluntary_ctxt_switches:	190
+-
+ Process Limits (From: /proc/PID/limits)
+  Limit                     Soft Limit           Hard Limit           Units
+  Max cpu time              unlimited            unlimited            seconds
+  Max file size             unlimited            unlimited            bytes
+  Max data size             unlimited            unlimited            bytes
+  Max stack size            8388608              unlimited            bytes
+  Max core file size        0                    unlimited            bytes
+  Max resident set          unlimited            unlimited            bytes
+  Max processes             7779                 7779                 processes
+  Max open files            32768                32768                files
+  Max locked memory         8388608              8388608              bytes
+  Max address space         unlimited            unlimited            bytes
+  Max file locks            unlimited            unlimited            locks
+  Max pending signals       7779                 7779                 signals
+  Max msgqueue size         819200               819200               bytes
+  Max nice priority         40                   40
+  Max realtime priority     0                    0
+  Max realtime timeout      unlimited            unlimited            us
+-
+ Process Details (From: /proc/PID/smaps)
+                   Pss      Pss   Shared  Private   Shared  Private  SwapPss
+                 Total    Clean    Dirty    Dirty    Clean    Clean    Dirty
+                ------   ------   ------   ------   ------   ------   ------
+  Native Heap        0        0        0        0        0        0        0
+  Dalvik Heap        0        0        0        0        0        0        0
+        Stack       60        0        4       60        0        0        0
+       Ashmem       15        0      528        0        0        0        0
+    Other dev       12        0      284        4        0        4        0
+     .so mmap    13785    10092      852      276    30096    10092       14
+    .jar mmap     8578     3712        0        0    35628     3712        0
+    .apk mmap      548      300        0       12     1496      300        0
+    .ttf mmap      611      488        0        0      280      488        0
+    .dex mmap     9467       24        0     9432      496       24        0
+    .oat mmap      311      216       16        0     1864      216        0
+   Other mmap      278        0       88        8     1008      144        0
+      Unknown    29010        0    11152    26536     2624     1668      567
+        TOTAL    63256    14832    12924    36328    73492    16648      581
+-
+ Process Dalvik Details (From: /proc/PID/smaps)
+   .Boot vdex       11        0        0        0      496        0        0
+     .App dex     9456       24        0     9432        0       24        0
+-
+ Process Summary (From: /proc/PID/smaps)
+                       Pss(KB)
+                        ------
+           Java Heap:        0
+         Native Heap:        0
+                Code:    24552
+               Stack:       60
+       Private Other:    28364
+              System:    10280
+               TOTAL:    63256       TOTAL SWAP PSS:      581
+-
+
+
+
+java stacktrace:
+  at edts.apm.android.verifier.NativeCrashTrigger.crashNow(Native method)
+  at edts.apm.android.verifier.MainActivity.onCreate$lambda$4(MainActivity.kt:66)
+  at edts.apm.android.verifier.MainActivity.$r8$lambda$uoHyJNxg-Pc2gWH4ifwoy6vkqwI(unavailable:0)
+  at edts.apm.android.verifier.MainActivity$$ExternalSyntheticLambda2.invoke(D8$$SyntheticClass:0)
+  at edts.apm.android.verifier.MainActivity.button$lambda$16$lambda$15(MainActivity.kt:138)
+  at edts.apm.android.verifier.MainActivity.$r8$lambda$skQTpt0yAwoAYK3kjeXIZBp0wqs(unavailable:0)
+  at edts.apm.android.verifier.MainActivity$$ExternalSyntheticLambda8.onClick(D8$$SyntheticClass:0)
+  at android.view.View.performClick(View.java:7542)
+  at android.view.View.performClickInternal(View.java:7519)
+  at android.view.View.-$$Nest$mperformClickInternal(unavailable:0)
+  at android.view.View$PerformClick.run(View.java:29476)
+  at android.os.Handler.handleCallback(Handler.java:942)
+  at android.os.Handler.dispatchMessage(Handler.java:99)
+  at android.os.Looper.loopOnce(Looper.java:201)
+  at android.os.Looper.loop(Looper.java:288)
+  at android.app.ActivityThread.main(ActivityThread.java:7924)
+  at java.lang.reflect.Method.invoke(Native method)
+  at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:548)
+  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:936)
+
+
+
+memory info:
+ Process Summary (From: android.os.Debug.MemoryInfo)
+                       Pss(KB)
+                        ------
+           Java Heap:     9876
+         Native Heap:    13740
+                Code:    24100
+               Stack:      640
+            Graphics:        0
+       Private Other:     4180
+              System:    10582
+               TOTAL:    63118           TOTAL SWAP:    17836
+
+
+
+
+foreground:
+no
+

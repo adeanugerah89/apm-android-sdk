@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+# Any module's build output — /build alone only covered the root project,
+# leaving sdk/build and app/build untracked-but-visible.
+build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties

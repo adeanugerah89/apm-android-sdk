@@ -1,0 +1,286 @@
+
+
+xcrash error:
+child terminated normally with non-zero exit status(102), dumper=/data/app/~~ycDFG6lHOb3_VrL4HONDzg==/edts.apm.android.verifier-YT76FZrCwXNINYMQL7ZZWg==/lib/arm64/libxcrash_dumper.so
+
+*** *** *** *** *** *** *** *** *** *** *** *** *** *** *** ***
+Tombstone maker: 'xCrash 3.1.0'
+Crash type: 'native'
+Start time: '2026-09-08T17:27:00.789+0700'
+Crash time: '2026-09-08T17:28:14.234+0700'
+App ID: 'edts.apm.android.verifier'
+App version: '1.0'
+Rooted: 'No'
+API level: '34'
+OS version: '14'
+Kernel version: 'Linux version 5.10.236-android12-9-o-g6e00d9b74f62 #1 SMP PREEMPT Fri Dec 5 05:18:07 UTC 2025 (aarch64)'
+ABI list: 'arm64-v8a,armeabi-v7a,armeabi'
+Manufacturer: 'realme'
+Brand: 'realme'
+Model: 'RMX3630'
+Build fingerprint: 'realme/RMX3630T2/RE8DDCL1:14/UKQ1.230924.001/S.215cf3d_11fb5:user/release-keys'
+ABI: 'arm64'
+pid: 2164, tid: 2164, name: ndroid.verifier  >>> edts.apm.android.verifier <<<
+signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0
+    x0  0000000000000000  x1  00000074c00e4640  x2  0000000000000000  x3  0000000000000000
+    x4  0000000000000000  x5  6f9aa41985618a15  x6  0000007fc7b2e0c0  x7  00000075bf099d50
+    x8  0000000000000000  x9  6f9aa41985618a15  x10 0000000000000130  x11 0000000000000001
+    x12 0000000000000006  x13 298e3ddd53fd9cf7  x14 ffffffffffffffff  x15 0000000000000000
+    x16 0000000000000001  x17 00000075b82e0640  x18 0000007668a0a000  x19 b4000075c6410800
+    x20 0000000000000000  x21 b4000075c64108c0  x22 0000000000000000  x23 b4000075c6410800
+    x24 0000007fc7b2f8b8  x25 0000007fc7b2f5a0  x26 0000000000000000  x27 00000074c00e4640
+    x28 0000007fc7b2f470  x29 0000007fc7b2f450
+    sp  0000007fc7b2f420  lr  00000075b82e0660  pc  00000075b82e0678
+
+backtrace:
+    #00 pc 0000000000000678  /data/app/~~ycDFG6lHOb3_VrL4HONDzg==/edts.apm.android.verifier-YT76FZrCwXNINYMQL7ZZWg==/base.apk!/lib/arm64-v8a/libapm_crash_trigger.so
+    #01 pc 0000000000000660  /data/app/~~ycDFG6lHOb3_VrL4HONDzg==/edts.apm.android.verifier-YT76FZrCwXNINYMQL7ZZWg==/base.apk!/lib/arm64-v8a/libapm_crash_trigger.so (Java_edts_apm_android_verifier_NativeCrashTrigger_crashNow+32)
+    #02 pc 00000000002c2104  /apex/com.android.art/lib64/libart.so
+    #03 pc 00000000002ab064  /apex/com.android.art/lib64/libart.so
+    #04 pc 000000000058628c  /apex/com.android.art/lib64/libart.so (_ZN3art11interpreter6DoCallILb0EEEbPNS_9ArtMethodEPNS_6ThreadERNS_11ShadowFrameEPKNS_11InstructionEtbPNS_6JValueE+1988)
+    #05 pc 0000000000490b68  /apex/com.android.art/lib64/libart.so
+    #06 pc 00000000003d12bc  /apex/com.android.art/lib64/libart.so
+    #07 pc 00000000003d1e88  /apex/com.android.art/lib64/libart.so
+    #08 pc 000000000058693c  /apex/com.android.art/lib64/libart.so (_ZN3art11interpreter6DoCallILb0EEEbPNS_9ArtMethodEPNS_6ThreadERNS_11ShadowFrameEPKNS_11InstructionEtbPNS_6JValueE+3700)
+    #09 pc 0000000000490b68  /apex/com.android.art/lib64/libart.so
+    #10 pc 00000000003d12bc  /apex/com.android.art/lib64/libart.so
+    #11 pc 00000000003d1e88  /apex/com.android.art/lib64/libart.so
+    #12 pc 000000000058693c  /apex/com.android.art/lib64/libart.so (_ZN3art11interpreter6DoCallILb0EEEbPNS_9ArtMethodEPNS_6ThreadERNS_11ShadowFrameEPKNS_11InstructionEtbPNS_6JValueE+3700)
+    #13 pc 0000000000490b68  /apex/com.android.art/lib64/libart.so
+    #14 pc 00000000003d12bc  /apex/com.android.art/lib64/libart.so
+    #15 pc 00000000003d1e88  /apex/com.android.art/lib64/libart.so
+    #16 pc 000000000058693c  /apex/com.android.art/lib64/libart.so (_ZN3art11interpreter6DoCallILb0EEEbPNS_9ArtMethodEPNS_6ThreadERNS_11ShadowFrameEPKNS_11InstructionEtbPNS_6JValueE+3700)
+    #17 pc 0000000000491128  /apex/com.android.art/lib64/libart.so
+    #18 pc 00000000003d12bc  /apex/com.android.art/lib64/libart.so
+    #19 pc 00000000003d1e88  /apex/com.android.art/lib64/libart.so
+    #20 pc 000000000058693c  /apex/com.android.art/lib64/libart.so (_ZN3art11interpreter6DoCallILb0EEEbPNS_9ArtMethodEPNS_6ThreadERNS_11ShadowFrameEPKNS_11InstructionEtbPNS_6JValueE+3700)
+    #21 pc 0000000000490b68  /apex/com.android.art/lib64/libart.so
+    #22 pc 00000000003d12bc  /apex/com.android.art/lib64/libart.so
+    #23 pc 00000000003d1e88  /apex/com.android.art/lib64/libart.so
+    #24 pc 000000000058693c  /apex/com.android.art/lib64/libart.so (_ZN3art11interpreter6DoCallILb0EEEbPNS_9ArtMethodEPNS_6ThreadERNS_11ShadowFrameEPKNS_11InstructionEtbPNS_6JValueE+3700)
+    #25 pc 0000000000490b68  /apex/com.android.art/lib64/libart.so
+    #26 pc 00000000003d12bc  /apex/com.android.art/lib64/libart.so
+    #27 pc 00000000003d0f1c  /apex/com.android.art/lib64/libart.so
+    #28 pc 00000000003d0650  /apex/com.android.art/lib64/libart.so
+    #29 pc 00000000002c223c  /apex/com.android.art/lib64/libart.so
+    #30 pc 000000004862ed94  <unknown>
+
+logcat:
+--------- tail end of log main (/system/bin/logcat -b main -d -v threadtime -t 200 --pid 2164 *:D)
+--------- beginning of main
+09-08 17:28:14.204  2164  2164 D ViewRootImplExtImpl: the up motion event handled by client, just return
+09-08 17:28:14.223  2164  2164 D nativeloader: Load /data/app/~~ycDFG6lHOb3_VrL4HONDzg==/edts.apm.android.verifier-YT76FZrCwXNINYMQL7ZZWg==/base.apk!/lib/arm64-v8a/libapm_crash_trigger.so using class loader ns clns-4 (caller=/data/app/~~ycDFG6lHOb3_VrL4HONDzg==/edts.apm.android.verifier-YT76FZrCwXNINYMQL7ZZWg==/base.apk!classes16.dex): ok
+09-08 17:28:14.226  2164  2164 D CompatibilityChangeReporter: Compat change id reported: 147798919; UID 10678; state: ENABLED
+--------- tail end of log system (/system/bin/logcat -b system -d -v threadtime -t 50 --pid 2164 *:W)
+--------- tail end of log events (/system/bin/logcat -b events -d -v threadtime -t 50 --pid 2164 *:I)
+--------- beginning of events
+09-08 17:27:00.682  2164  2164 I wm_on_create_called: [74293828,edts.apm.android.verifier.MainActivity,performCreate,130]
+09-08 17:27:00.683  2164  2164 I wm_on_start_called: [74293828,edts.apm.android.verifier.MainActivity,handleStartActivity,0]
+09-08 17:27:00.690  2164  2164 I wm_on_resume_called: [74293828,edts.apm.android.verifier.MainActivity,RESUME_ACTIVITY,1]
+09-08 17:27:00.730  2164  2164 I wm_on_top_resumed_gained_called: [74293828,edts.apm.android.verifier.MainActivity,topStateChangedWhenResumed]
+
+memory info:
+ System Summary (From: /proc/meminfo)
+  MemTotal:        7875756 kB
+  MemFree:          359624 kB
+  MemAvailable:    3986784 kB
+  Buffers:            3196 kB
+  Cached:          3808724 kB
+  SwapCached:         4268 kB
+  Active:          2187880 kB
+  Inactive:        3152044 kB
+  Active(anon):     510544 kB
+  Inactive(anon):  1208724 kB
+  Active(file):    1677336 kB
+  Inactive(file):  1943320 kB
+  Unevictable:      141408 kB
+  Mlocked:          141408 kB
+  SwapTotal:       7864316 kB
+  SwapFree:        6590064 kB
+  Dirty:               360 kB
+  Writeback:             0 kB
+  AnonPages:       1665708 kB
+  Mapped:          1225620 kB
+  Shmem:             66592 kB
+  KReclaimable:     307900 kB
+  Slab:             657532 kB
+  SReclaimable:     230128 kB
+  SUnreclaim:       427404 kB
+  KernelStack:      115264 kB
+  ShadowCallStack:   28916 kB
+  PageTables:       118268 kB
+  NFS_Unstable:          0 kB
+  Bounce:                0 kB
+  WritebackTmp:          0 kB
+  CommitLimit:    11802192 kB
+  Committed_AS:   231548384 kB
+  VmallocTotal:   263061440 kB
+  VmallocUsed:      319308 kB
+  VmallocChunk:          0 kB
+  Percpu:            21280 kB
+  AnonHugePages:         0 kB
+  ShmemHugePages:        0 kB
+  ShmemPmdMapped:        0 kB
+  FileHugePages:         0 kB
+  FilePmdMapped:         0 kB
+  HugePagePool:          0 kB
+  DoubleMapTHP:          0 kB
+  CmaTotal:         540672 kB
+  CmaFree:            1872 kB
+  IonTotalCache:     77772 kB
+  IonTotalUsed:     236892 kB
+  GPUTotalUsed:     110208 kB
+-
+ Process Status (From: /proc/PID/status)
+  Name:	ndroid.verifier
+  Umask:	0077
+  State:	R (running)
+  Tgid:	2164
+  Ngid:	0
+  Pid:	2164
+  PPid:	908
+  TracerPid:	0
+  Uid:	10678	10678	10678	10678
+  Gid:	10678	10678	10678	10678
+  FDSize:	256
+  Groups:	3003 9997 20678 50678
+  VmPeak:	 9055784 kB
+  VmSize:	 8945684 kB
+  VmLck:	       0 kB
+  VmPin:	       0 kB
+  VmHWM:	  243208 kB
+  VmRSS:	  241348 kB
+  RssAnon:	   89236 kB
+  RssFile:	  132064 kB
+  RssShmem:	   20048 kB
+  VmData:	 3485928 kB
+  VmStk:	    8192 kB
+  VmExe:	       8 kB
+  VmLib:	  189492 kB
+  VmPTE:	    1356 kB
+  VmSwap:	      80 kB
+  CoreDumping:	0
+  THP_enabled:	1
+  Threads:	45
+  SigQ:	0/28377
+  SigPnd:	0000000000000000
+  ShdPnd:	0000000000000000
+  SigBlk:	7fffff00fffbfeff
+  SigIgn:	0000000000000001
+  SigCgt:	0000126e400084f8
+  CapInh:	0000000000000000
+  CapPrm:	0000000000000000
+  CapEff:	0000000000000000
+  CapBnd:	0000000000000000
+  CapAmb:	0000000000000000
+  NoNewPrivs:	0
+  Seccomp:	2
+  Seccomp_filters:	1
+  Speculation_Store_Bypass:	thread vulnerable
+  Cpus_allowed:	ff
+  Cpus_allowed_list:	0-7
+  Mems_allowed:	1
+  Mems_allowed_list:	0
+  voluntary_ctxt_switches:	386
+  nonvoluntary_ctxt_switches:	40
+-
+ Process Limits (From: /proc/PID/limits)
+  Limit                     Soft Limit           Hard Limit           Units
+  Max cpu time              unlimited            unlimited            seconds
+  Max file size             unlimited            unlimited            bytes
+  Max data size             unlimited            unlimited            bytes
+  Max stack size            8388608              unlimited            bytes
+  Max core file size        0                    unlimited            bytes
+  Max resident set          unlimited            unlimited            bytes
+  Max processes             28377                28377                processes
+  Max open files            32768                32768                files
+  Max locked memory         unlimited            unlimited            bytes
+  Max address space         unlimited            unlimited            bytes
+  Max file locks            unlimited            unlimited            locks
+  Max pending signals       28377                28377                signals
+  Max msgqueue size         819200               819200               bytes
+  Max nice priority         40                   40
+  Max realtime priority     0                    0
+  Max realtime timeout      unlimited            unlimited            us
+-
+ Process Details (From: /proc/PID/smaps)
+                   Pss      Pss   Shared  Private   Shared  Private  SwapPss
+                 Total    Clean    Dirty    Dirty    Clean    Clean    Dirty
+                ------   ------   ------   ------   ------   ------   ------
+  Native Heap    20269        0     3632    20212        4        0        0
+  Dalvik Heap        0        0        0        0        0        0        0
+        Stack       88        0        8       88        0        0        0
+       Ashmem       23        0      576        0       44        0        0
+    Other dev       33        0      632        4        0       24        0
+     .so mmap    11410     3368     8272      404    61940     3368        0
+    .jar mmap     2519      280        0        0    52448      280        0
+    .apk mmap      349      192        0       12     1924      192        0
+    .ttf mmap      267      108        0        0      664      108        0
+    .dex mmap     9443        0        0     9432      796        0        0
+    .oat mmap       35        0        0        0     2216        0        0
+    .art mmap        2        0        0        0      228        0        0
+   Other mmap     9474        0    18840        8     1856       36        0
+      Unknown    15688        0    32864    15052       36      120        0
+        TOTAL    69600     3948    64824    45212   122156     4128        0
+-
+ Process Dalvik Details (From: /proc/PID/smaps)
+   .Boot vdex       11        0        0        0      796        0        0
+     .App dex     9432        0        0     9432        0        0        0
+    .Boot art        2        0        0        0      228        0        0
+-
+ Process Summary (From: /proc/PID/smaps)
+                       Pss(KB)
+                        ------
+           Java Heap:        0
+         Native Heap:    20212
+                Code:    13796
+               Stack:       88
+       Private Other:    15244
+              System:    20260
+               TOTAL:    69600       TOTAL SWAP PSS:        0
+-
+
+
+
+java stacktrace:
+  at edts.apm.android.verifier.NativeCrashTrigger.crashNow(Native method)
+  at edts.apm.android.verifier.MainActivity.onCreate$lambda$4(MainActivity.kt:)
+  at edts.apm.android.verifier.MainActivity.$r8$lambda$uoHyJNxg-Pc2gWH4ifwoy6vkqwI(unavailable:)
+  at edts.apm.android.verifier.MainActivity$$ExternalSyntheticLambda2.invoke(D8$$SyntheticClass:)
+  at edts.apm.android.verifier.MainActivity.button$lambda$16$lambda$15(MainActivity.kt:)
+  at edts.apm.android.verifier.MainActivity.$r8$lambda$skQTpt0yAwoAYK3kjeXIZBp0wqs(unavailable:)
+  at edts.apm.android.verifier.MainActivity$$ExternalSyntheticLambda8.onClick(D8$$SyntheticClass:)
+  at android.view.View.performClick(View.java:)
+  at android.view.View.performClickInternal(View.java:)
+  at android.view.View.-$$Nest$mperformClickInternal(unavailable:)
+  at android.view.View$PerformClick.run(View.java:)
+  at android.os.Handler.handleCallback(Handler.java:)
+  at android.os.Handler.dispatchMessage(Handler.java:)
+  at android.os.Looper.loopOnce(Looper.java:)
+  at android.os.Looper.loop(Looper.java:)
+  at android.app.ActivityThread.main(ActivityThread.java:)
+  at java.lang.reflect.Method.invoke(Native method)
+  at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:)
+  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:)
+
+
+
+memory info:
+ Process Summary (From: android.os.Debug.MemoryInfo)
+                       Pss(KB)
+                        ------
+           Java Heap:    11072
+         Native Heap:    20228
+                Code:    13696
+               Stack:     1264
+            Graphics:     6752
+       Private Other:     3312
+              System:    20330
+               TOTAL:    76654           TOTAL SWAP:       48
+
+
+
+
+foreground:
+yes
+

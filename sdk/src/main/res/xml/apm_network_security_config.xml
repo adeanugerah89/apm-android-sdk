@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Reference network security config for host apps (SEC-10).
+
+  The SDK does NOT apply this itself, and deliberately does not set
+  android:usesCleartextTraffic="false" in its own manifest: manifest merger would push that onto
+  the whole host app and break every app that still has a legitimate cleartext endpoint. Forcing
+  a platform-wide setting from a monitoring library is exactly the kind of change that gets the
+  library removed rather than the cleartext fixed.
+
+  The SDK's own connections are already TLS-1.2-floor and cleartext-incapable by construction —
+  see TlsPolicy / ApmHttpClientFactory. This file is what a host app points
+  android:networkSecurityConfig at when it wants the same guarantee for its own traffic:
+
+      <application android:networkSecurityConfig="@xml/apm_network_security_config" ... >
+
+  Host apps that need cleartext for specific hosts should copy this file and add their own
+  <domain-config cleartextTrafficPermitted="true"> entries rather than dropping the whole policy.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

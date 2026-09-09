@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- APM SDK requires network access for event upload -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        MOB-30 root detection: lets RootDetector check for specific known root-manager
+        packages under API 30+ package visibility filtering, without QUERY_ALL_PACKAGES
+        (a sensitive permission the CONSTITUTION forbids using for integrity signals).
+    -->
+    <queries>
+        <package android:name="com.topjohnwu.magisk" />
+        <package android:name="eu.chainfire.supersu" />
+        <package android:name="com.noshufou.android.su" />
+    </queries>
+</manifest>
