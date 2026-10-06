@@ -162,7 +162,7 @@ Aplikasi yang dimonitor tidak menangani kategori data sangat sensitif (finansial
 | Bug SDK menyebabkan crash di app tim lain | Sangat tinggi — merusak kepercayaan, menghentikan adopsi | Entry point defensif, kill switch (MOB-21), rollout bertahap, canary di app sendiri | Mobile |
 | Nomor telepon bocor ke storage lewat jalur tak terduga (URL/error/breadcrumb **atau** `user_id`) | Tinggi — APM berubah jadi basis data PII tanpa disengaja | Scrubbing berlapis (SEC-03b, SEC-05) · `user_id` di-hash di ingestion (BE-21) · `server_key` server-side (SEC-28) · audit kebocoran (SEC-24) | Mobile + Backend |
 | Rotasi sertifikat mematikan telemetri seluruh app | Tinggi | Dihindari secara desain: pinning **tidak aktif secara default** (SEC-11 → P2). Bila suatu app menyalakannya, wajib pin cadangan + kill switch | Mobile |
-| Symbol tidak terupload → crash report tak terbaca | Tinggi | CI gagal jika upload gagal, peringatan eksplisit di dashboard (FE-17) | Mobile + Backend |
+| Symbol tidak terupload → crash report tak terbaca | Tinggi | Gerbang manual `release-dsyms.sh` sebelum upload TestFlight (repo `APMKit`, folder `docs-ios/04-dSYM-Archiving.md` — bukan folder `docs/` di repo ini) — bukan CI, bergantung pada orangnya menjalankan; peringatan eksplisit di dashboard (FE-17) masih rencana | Mobile + Backend |
 | Disk penuh di server on-premise → data hilang | Tinggi | Alert di 70% kapasitas (OPS-05), TTL retensi, sampling, runbook | Backend |
 | Endpoint ingestion terbuka ke internet jadi sasaran abuse | Sedang | WAF + rate limit di DMZ (OPS-04), kunci write-only, quota per install | Backend |
 | Adopsi tim lain rendah karena integrasi merepotkan | Sedang | Sample app + dokumentasi, target integrasi < 30 menit (MOB-25) | Mobile |
@@ -174,7 +174,7 @@ Aplikasi yang dimonitor tidak menangani kategori data sangat sensitif (finansial
 
 ## 11. Keputusan Terbuka
 
-**Sudah diputuskan:** hosting on-premise · identifier bebas diisi app host tapi di-hash jadi `user_ref` opaque di ingestion, storage tidak simpan nilai mentah (Opsi B) · sinyal integrity (emulator/root/dev-mode) via heuristik di v1 · SDK internal saja.
+**Sudah diputuskan:** hosting on-premise · identifier bebas diisi app host tapi di-hash jadi `user_ref` opaque di ingestion, storage tidak simpan nilai mentah (Opsi B) · sinyal integrity (emulator/root/dev-mode) via heuristik di v1 · SDK internal saja · arsip dSYM manual, bukan otomatis (lihat repo `APMKit`, folder `docs-ios/04-dSYM-Archiving.md` — bukan folder `docs/` di repo ini).
 
 | # | Keputusan | Implikasi | Sebelum |
 |---|---|---|---|
@@ -187,6 +187,16 @@ Aplikasi yang dimonitor tidak menangani kategori data sangat sensitif (finansial
 | 7 | Periode retensi final | Biaya storage vs kedalaman analisis historis | M4 |
 | 8 | Konvensi isi `user_id` lintas tim adopter | Agar `user_ref` konsisten dengan sistem utama tiap tim, sehingga resolve by nomor HP/email cocok | M1 |
 | 9 | Upgrade sinyal integrity ke attestation (Play Integrity / App Attest) | Hanya bila device-integrity mau dijadikan security gate, bukan sekadar observability — v1 pakai heuristik | pasca-v1 |
+
+**Catatan tambahan (2026-09-29, di luar tabel keputusan produk — tidak ada milestone "Sebelum" yang cocok untuk keduanya):** Utang teknis per-file dari penutupan investigasi breadcrumb yang sama dicatat terpisah di `APMKit/FEATURES.md`, blok bertanggal 2026-09-28 — dua item di bawah ini adalah keputusan level produk yang muncul dari investigasi lanjutannya, bukan utang kode, sehingga ditulis di sini, bukan di sana.
+
+- **Integrasi Alamofire/Moya belum ada titiknya.** `APM.instrumentedSession(...)` (`02` §3.1) mengasumsikan aplikasi host membuat `URLSession`-nya sendiri dan memakainya langsung. Alamofire (dan Moya di atasnya) membuat `URLSession` dan `SessionDelegate`-nya sendiri secara internal, sehingga `APM.instrumentedSession` tidak dapat dipasang begitu saja. Jalur yang mungkin: protokol `EventMonitor` milik Alamofire, atau membaca `response.metrics` per request. Belum diputuskan, belum dikerjakan.
+- **`99-PRD-Lengkap.md:334` memuat klaim MOB-01 versi lama** ("menangkap metrik **seluruh** HTTP request") yang kini terbukti tidak akurat (lihat koreksi cakupan di `02-Mobile-SDK.md` §3.1, 2026-09-29). File itu sengaja tidak diperbaiki di sini karena sudah menyatakan dirinya legacy dan non-kanonis (baris 3 file tersebut) — memperbaiki satu baris di dalamnya akan membuat disclaimer itu sendiri tidak lagi benar. Yang belum diputuskan: apakah file ini dipertahankan, diarsipkan, atau dihapus. Selama ia tetap ada, divergensi semacam ini (isi legacy vs isi kanonis yang sudah berubah) akan terus bertambah.
+
+**(2026-10-02, PRIORITAS TINGGI — keputusan cakupan produk, belum diputuskan, jangan dikerjakan.)** Sesi yang berjalan normal (tanpa crash/error) tidak meninggalkan jejak apa pun di database — bukan karena bug, tapi karena tidak ada mekanisme yang mengirim sinyal "sesi ini terjadi" untuk kasus bersih (lihat catatan teknis di `01-Kontrak-Data-API.md` §4.6 dan §10 untuk rincian kode/kontraknya; ini entrinya untuk keputusan produk yang masih terbuka, bukan utang kode). Bukti nyata dari pilot `edts.klik.ios.dev`: lima siklus pemakaian bersih berturut-turut (buka, pakai, tutup, tanpa crash/error disengaja) menghasilkan 0 baris di `events`; dari seluruh pengujian hari itu, hanya sesi yang kebetulan memicu hang/error yang pernah terlihat — `crash_free_sessions`/`crash_free_users` (`01` §10) secara struktural tidak akan pernah mendekati nilai sehat selama ini berlaku, terlepas dari seberapa stabil aplikasinya sungguhan. Perbaikannya **bukan** sekadar "kirim satu event lagi" — ada keputusan cakupan yang belum diambil:
+  - **Opsi sempit:** satu sinyal ringan per sesi (mis. `lifecycle` `foreground`/`terminate` otomatis, tidak host-invoked seperti `cold_start` sekarang) — cukup untuk membuat sesi bersih terhitung sebagai penyebut, volume data minimal.
+  - **Opsi luas:** sekalian merekam lalu lintas jaringan dan metrik performa untuk sesi bersih (bukan cuma penanda "sesi terjadi"), dengan nilai diagnostik lebih tinggi tapi menambah volume data dan pemakaian baterai pada **setiap** sesi, bukan hanya yang bermasalah — ini kebalikan tepat dari alasan breadcrumb sengaja TIDAK dikirim untuk sesi bersih (`01` §10: "tidak ada yang perlu didiagnosa pada sesi yang berjalan normal").
+  Trade-off volume/baterai vs keterlihatan metrik ini belum pernah dibandingkan atau diputuskan. Dicatat di sini, bukan dikerjakan.
 
 ---
 

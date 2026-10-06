@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
  * One request = one envelope. Static context at envelope level; volatile context per event.
  *
  * Wire shape must match iOS exactly: same field names, same schema_version.
- * sdk.name = "apm-android-sdk" (platform-specific; iOS uses "apmkit-ios").
+ * sdk.name = [SdkIdentity.NAME] = "apm-android-sdk" (platform-specific; iOS uses "apmkit-ios").
  *
  * NOTE: user_id is transported RAW over TLS. Hashing to user_ref is the backend's job (BE-21).
  * The SDK must never hash it client-side. (SEC-06, CONSTITUTION invariant)

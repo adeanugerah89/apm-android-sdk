@@ -11,7 +11,8 @@ import kotlin.concurrent.withLock
 /**
  * Disk-backed FIFO event queue. (MOB-04/05/06)
  *
- * Storage: [queueDir] inside filesDir — excluded from auto-backup via backup_rules.xml (A2).
+ * Storage: [queueDir] lives under `noBackupFilesDir` (see [edts.apm.android.sdk.internal.SdkStorage]), which the
+ * platform's Auto Backup always excludes, regardless of the host's rules (SEC-07, A29).
  * Atomicity: write to <uuid>.tmp, then rename to <uuid>.evt — rename is atomic on POSIX.
  *   If the process dies during write, the .tmp file is left behind and cleaned up on next init.
  * FIFO: files sorted by lastModified(). On most Linux filesystems rename preserves the

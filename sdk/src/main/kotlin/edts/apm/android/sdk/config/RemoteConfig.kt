@@ -20,7 +20,12 @@ data class RemoteConfig(
     val enabled: Boolean = true,
     val sampling: Sampling = Sampling(),
     @SerialName("max_batch") val maxBatch: Int = 200,
-    @SerialName("upload_interval_s") val uploadIntervalS: Long = 30,
+    /**
+     * A `Double`, not a `Long`: the backend stores it as `DOUBLE PRECISION` (apm-backend migration
+     * 000006, only `>= 30` is enforced), so `45.5` is a legal value. Decoding it as `Long` throws, and a
+     * thrown decode discards the whole config — including `enabled: false`. iOS decodes it as `Double`.
+     */
+    @SerialName("upload_interval_s") val uploadIntervalS: Double = 30.0,
     @SerialName("disabled_features") val disabledFeatures: List<String> = emptyList()
 ) {
     @Serializable
@@ -67,7 +72,7 @@ data class RemoteConfig(
         val DEFAULT = RemoteConfig()
 
         const val MAX_ALLOWED_BATCH = 1_000
-        const val MIN_INTERVAL_S = 5L
-        const val MAX_INTERVAL_S = 24L * 60 * 60
+        const val MIN_INTERVAL_S = 5.0
+        const val MAX_INTERVAL_S = 24.0 * 60 * 60
     }
 }

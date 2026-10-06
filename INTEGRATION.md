@@ -122,11 +122,22 @@ The CI token is separate from your app key; never use the app key here.
 APM.logError(exception)                                    // handled error + breadcrumb trail
 APM.logError(exception, mapOf("order_id" to "12345"))      // up to a few small extra fields
 APM.setUser("+628123456789")                               // any string you use to identify a user
+APM.clearUser()                                            // call on logout
 APM.breadcrumb("tapped checkout", BreadcrumbCategory.USER_ACTION)
 ```
 
 `BreadcrumbCategory`: `NAVIGATION`, `USER_ACTION`, `NETWORK`, `LIFECYCLE`, `STATE`, `LOG`.
 `BreadcrumbLevel`: `DEBUG`, `INFO`, `WARNING`, `ERROR` (defaults to `INFO`).
+
+**`setUser` survives a restart** — call it when the user signs in, as you would on iOS; you do **not** need to
+call it again on every launch (calling it again with the same value is harmless and changes nothing). **Call
+`clearUser()` when they sign out.** The SDK cannot see your sign-out, and without it anonymous activity keeps
+going out under the last user.
+
+Events are uploaded under the user who was signed in **when they were captured**, not whoever is signed in
+when the upload happens. A user switch (`setUser` with a different value, or `clearUser`) therefore does not
+re-label what was already captured. If the SDK can no longer tell whose an older event was — for example after
+a restart that skipped several users — it sends it as anonymous (`user_id_source: generated`) rather than guess.
 
 Every one of these is safe to call from any thread, before `start()`, and after a failed `start()` —
 they do nothing rather than throw. Capture never blocks the calling thread.
@@ -171,12 +182,29 @@ The SDK itself declares only `INTERNET` and `ACCESS_NETWORK_STATE`. The four abo
 and **will appear on your Play Store listing**. If that is a problem for your app, raise it with the
 APM team before integrating rather than after.
 
+### Backups
+
+**You need to do nothing.** The event queue, the cached remote config and the SDK's small key-value state
+(the random `install_id`, a generated fallback user id, the current session id, two crash-dedup markers) are
+all stored in `noBackupFilesDir`, which Android's Auto Backup always excludes — whatever backup rules your
+app declares. Two consequences worth knowing:
+
+- A reinstall, or a restore onto another device, starts a **new** `install_id`, as `01` §2 specifies. One
+  `install_id` never ends up on two live devices.
+- An app **update** keeps its `install_id` and its pending events: the SDK moves what an older build kept in
+  `filesDir` / `shared_prefs` into the no-backup directory the first time it starts.
+
+The SDK does not set `allowBackup`, `fullBackupContent` or `dataExtractionRules`: from a library the manifest
+merger would force them onto your whole app, overriding a policy that is yours. A host-supplied `setUser`
+value is never written to disk at all.
+
 ### What is collected
 
 Network timings and failure categories (never request or response bodies), handled and unhandled
 errors, crashes, ANRs, cold start, screen names, breadcrumbs, and coarse device/integrity signals.
 Personal data is redacted before anything reaches disk. `user_id` is whatever string you pass to
-`setUser` — it is sent over TLS and hashed server-side, never stored raw.
+`setUser` — it is sent over TLS and hashed server-side, and the backend never stores it raw. On the device the
+current value is kept in app-private storage that is excluded from backup (encrypted when the Keystore allows).
 
 **Your Play Console Data Safety form and your privacy policy both need updating** — a release whose
 Data Safety form does not match its behaviour can be rejected. [DATA-INVENTORY.md](DATA-INVENTORY.md)
@@ -194,9 +222,9 @@ is yours: what you pass to `APM.setUser()`.
 ## Checking it works
 
 1. Run your app, trigger `APM.logError(RuntimeException("apm check"))`.
-2. Confirm files appear in `<app filesDir>/apm-queue/`:
+2. Confirm files appear in `<app noBackupFilesDir>/apm-queue/`:
    ```bash
-   adb shell run-as <your.package.name> ls -l files/apm-queue/
+   adb shell run-as <your.package.name> ls -l no_backup/apm-queue/
    ```
    (Debug builds only — `run-as` does not work on a release APK.)
 3. With `debugLogging = true` in a debug build, `adb logcat -s APM` shows one line per captured

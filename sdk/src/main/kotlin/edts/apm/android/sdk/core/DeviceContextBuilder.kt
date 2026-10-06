@@ -11,9 +11,12 @@ import java.util.TimeZone
  */
 object DeviceContextBuilder {
 
+    /** The one place the OS version string comes from, so capture-time and upload-time cannot disagree. */
+    fun osVersion(): String = Build.VERSION.RELEASE
+
     fun buildDeviceInfo(): DeviceInfo = DeviceInfo(
         os        = "Android",
-        osVersion = Build.VERSION.RELEASE,                   // e.g. "14"
+        osVersion = osVersion(),                              // e.g. "14"
         model     = "${Build.MANUFACTURER} ${Build.MODEL}",  // e.g. "samsung SM-G991B"
         locale    = Locale.getDefault().toString(),           // e.g. "id_ID"
         timezone  = TimeZone.getDefault().id                  // e.g. "Asia/Jakarta"

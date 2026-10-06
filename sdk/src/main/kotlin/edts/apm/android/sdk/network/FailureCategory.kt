@@ -35,9 +35,9 @@ enum class FailureCategory {
  *
  * Android-specific notes:
  * - SSLPeerUnverifiedException: cert chain invalid / not trusted → ssl_certificate
- * - SSLPeerUnverifiedException from pinning: we detect this by a flag set during
- *   the secureConnectEnd callback when a custom hostname verifier / pinner rejects.
- *   At callFailed time, isPinningRejection flag → ssl_pinning_rejected. (MOB-03)
+ * - SSLPeerUnverifiedException from `CertificatePinner`: OkHttp throws the same type for a
+ *   pin mismatch, distinguishable only by its message, which starts with
+ *   "Certificate pinning failure!" (okhttp 4.12.0, `CertificatePinner.check`). → ssl_pinning_rejected (MOB-03)
  * - SSLHandshakeException (not peer-unverified): handshake protocol failure → tls_handshake
  * - SocketTimeoutException: timeout (read, write, or connect)
  * - UnknownHostException: DNS failure
@@ -45,8 +45,12 @@ enum class FailureCategory {
  */
 object FailureCategoryMapper {
 
-    fun map(e: IOException, isPinningRejection: Boolean = false): FailureCategory = when {
-        isPinningRejection                    -> FailureCategory.SSL_PINNING_REJECTED
+    /** Prefix of the message OkHttp's `CertificatePinner` puts on a pin mismatch. */
+    private const val PINNING_FAILURE_PREFIX = "Certificate pinning failure!"
+
+    fun map(e: IOException): FailureCategory = when {
+        e is SSLPeerUnverifiedException && e.message?.startsWith(PINNING_FAILURE_PREFIX) == true ->
+                                                 FailureCategory.SSL_PINNING_REJECTED
         e is SSLPeerUnverifiedException       -> FailureCategory.SSL_CERTIFICATE
         e is SSLHandshakeException            -> FailureCategory.TLS_HANDSHAKE
         e is SSLException                     -> FailureCategory.TLS_HANDSHAKE

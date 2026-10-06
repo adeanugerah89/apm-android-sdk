@@ -55,7 +55,8 @@ internal class ApmComponents(
     val sessionManager: SessionManager,
     val userIds: UserIdProvider,
     val anrWatchdog: AnrWatchdog?,
-    val uploadIntervalMs: Long,
+    /** Live: re-read each cycle because remote config can change it (`01` §9). */
+    val uploadIntervalMs: () -> Long,
     /**
      * Blocks until queued captures have reached disk. Capture is asynchronous (A18), so anything
      * asserting on the queue's contents must wait for the writer rather than assume it has run.

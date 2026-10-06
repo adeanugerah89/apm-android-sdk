@@ -229,4 +229,60 @@ class SyncEngineTest {
         val third = engine.syncOnce() as SyncOutcome.RetryAfter  // fresh 503, should be attempt 1 again
         assertEquals(BackoffPolicy.delayFor(1), third.delayMs)
     }
+
+    // ─── A31 · max_batch ───────────────────────────────────────────────────────
+
+    private fun cappedEngine(queue: FakeQueue, results: MutableList<UploadResult>, cap: () -> Int) =
+        SyncEngine(queue, FakeUploader(results), SdkHealth(), ::staticContext, clock = { fakeNow }, maxBatchProvider = cap)
+
+    @Test fun `a remote max_batch lowers how many events one upload asks for`() {
+        val queue = FakeQueue(50)
+        val engine = cappedEngine(queue, mutableListOf(UploadResult.HttpResponse(202, null)), cap = { 7 })
+
+        assertEquals(SyncOutcome.Sent(7), engine.syncOnce())
+
+        assertEquals(7, queue.lastPeekMaxCount)
+        assertEquals(43, queue.events.size)
+    }
+
+    @Test fun `a remote max_batch above the contract limit is clamped, not obeyed (01 section 7)`() {
+        val queue = FakeQueue(500)
+        val engine = cappedEngine(queue, mutableListOf(UploadResult.HttpResponse(202, null)), cap = { 1_000 })
+
+        engine.syncOnce()
+
+        assertEquals(EventQueue.MAX_BATCH, queue.lastPeekMaxCount)
+    }
+
+    @Test fun `the cap is re-read every attempt`() {
+        val queue = FakeQueue(100)
+        var cap = 10
+        val engine = cappedEngine(queue, mutableListOf(UploadResult.HttpResponse(202, null), UploadResult.HttpResponse(202, null)), cap = { cap })
+
+        engine.syncOnce(); assertEquals(10, queue.lastPeekMaxCount)
+        cap = 25
+        engine.syncOnce(); assertEquals(25, queue.lastPeekMaxCount)
+    }
+
+    @Test fun `413 halves from the capped size, and a success returns to the cap rather than to 200`() {
+        val queue = FakeQueue(100)
+        val engine = cappedEngine(
+            queue,
+            mutableListOf(UploadResult.HttpResponse(413, null), UploadResult.HttpResponse(202, null), UploadResult.HttpResponse(202, null)),
+            cap = { 40 }
+        )
+
+        assertEquals(SyncOutcome.SplitApplied, engine.syncOnce())
+        assertEquals(20, engine.currentBatchSize)          // 40 / 2 — not 200 / 2
+
+        assertEquals(SyncOutcome.Sent(20), engine.syncOnce())
+        assertEquals(40, engine.currentBatchSize)          // recovered to the cap, never above it
+    }
+
+    @Test fun `a nonsense cap can never stall the queue`() {
+        val queue = FakeQueue(5)
+        val engine = cappedEngine(queue, mutableListOf(UploadResult.HttpResponse(202, null)), cap = { 0 })
+
+        assertEquals(SyncOutcome.Sent(1), engine.syncOnce())   // floor of 1, not an empty peek forever
+    }
 }

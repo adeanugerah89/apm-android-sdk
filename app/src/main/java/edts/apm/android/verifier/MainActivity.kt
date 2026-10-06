@@ -105,8 +105,8 @@ class MainActivity : Activity() {
         appendLine("APM SDK started: ${APM.isStarted}")
         appendLine("networkEventListener: ${if (APM.networkEventListener() != null) "available" else "null"}")
         appendLine()
-        appendLine("Queue dir: ${filesDir.resolve("apm-queue")}")
-        val queueFiles = filesDir.resolve("apm-queue").listFiles()?.filter { it.name.endsWith(".evt") }.orEmpty()
+        appendLine("Queue dir: ${noBackupFilesDir.resolve("apm-queue")}")
+        val queueFiles = noBackupFilesDir.resolve("apm-queue").listFiles()?.filter { it.name.endsWith(".evt") }.orEmpty()
         appendLine("Queued events: ${queueFiles.size} (${queueFiles.sumOf { it.length() }} bytes)")
         appendLine()
         // Checklist 14: on a device the Keystore works, so files must NOT be readable JSON.

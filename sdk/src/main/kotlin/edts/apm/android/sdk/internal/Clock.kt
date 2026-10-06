@@ -16,7 +16,10 @@ import java.util.TimeZone
 object Clock {
     private const val PATTERN = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
 
-    fun nowIso8601(): String = newFormatter().format(Date(nowMillis()))
+    fun nowIso8601(): String = iso8601(nowMillis())
+
+    /** [epochMillis] as the same UTC string every other event carries. */
+    fun iso8601(epochMillis: Long): String = newFormatter().format(Date(epochMillis))
 
     fun nowMillis(): Long = System.currentTimeMillis()
 

@@ -40,7 +40,7 @@ class RemoteConfigStoreTest {
 
         val read = RemoteConfigStore(file).read()!!
         assertEquals(RemoteConfig.DEFAULT.maxBatch, read.maxBatch)
-        assertEquals(RemoteConfig.DEFAULT.uploadIntervalS, read.uploadIntervalS)
+        assertEquals(RemoteConfig.DEFAULT.uploadIntervalS, read.uploadIntervalS, 0.0)
     }
 
     @Test fun `write creates the parent directory when it does not exist`() {

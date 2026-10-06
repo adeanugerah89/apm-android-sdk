@@ -4,6 +4,41 @@ plugins {
 }
 
 /*
+ * The certificate the DEBUG build trusts so it can reach the local HTTPS ingest server in
+ * TESTING-ON-DEVICE.md. It is generated, never committed: a committed copy was a 30-day certificate that had
+ * expired within days, and kept a trust anchor in the repository for a key nobody could account for.
+ *
+ *  - `tools/device-testing/server.crt` present (the one the setup step in TESTING-ON-DEVICE.md creates) → that
+ *    certificate is trusted, so the device test works.
+ *  - absent → a throwaway certificate is made and its key discarded, so the debug build still assembles and
+ *    simply trusts nothing extra that anyone holds a key for.
+ */
+abstract class LocalTestCaTask : DefaultTask() {
+    @get:Internal abstract val deviceCert: RegularFileProperty
+    @get:Internal abstract val certConfig: RegularFileProperty
+    @get:OutputDirectory abstract val output: DirectoryProperty
+
+    @TaskAction fun generate() {
+        val raw = output.get().asFile.resolve("raw").apply { deleteRecursively(); mkdirs() }
+        val target = raw.resolve("apm_local_test_ca.pem")
+        val existing = deviceCert.get().asFile
+        if (existing.isFile) {
+            existing.copyTo(target, overwrite = true)
+            return
+        }
+        val scratch = temporaryDir
+        val process = ProcessBuilder(
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-days", "30", "-nodes",
+            "-keyout", scratch.resolve("discarded.key").path, "-out", target.path,
+            "-config", certConfig.get().asFile.path
+        ).redirectErrorStream(true).start()
+        val log = process.inputStream.bufferedReader().readText()
+        check(process.waitFor() == 0) { "openssl failed while making the debug test certificate:\n$log" }
+        scratch.resolve("discarded.key").delete()
+    }
+}
+
+/*
  * Verification app (A17, MOB-25). Its only job is to exercise the SDK on a real device so the
  * device-only checklist in FEATURES.md can actually be run.
  *
@@ -68,6 +103,19 @@ android {
 
     kotlinOptions {
         jvmTarget = "11"
+    }
+}
+
+val generateLocalTestCa = tasks.register<LocalTestCaTask>("generateLocalTestCa") {
+    deviceCert.set(rootProject.layout.projectDirectory.file("tools/device-testing/server.crt"))
+    certConfig.set(rootProject.layout.projectDirectory.file("tools/device-testing/cert.cnf"))
+    output.set(layout.buildDirectory.dir("generated/localTestCa"))
+    outputs.upToDateWhen { false }   // the inputs live outside the project model; making one is cheap
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.sources.res?.addGeneratedSourceDirectory(generateLocalTestCa, LocalTestCaTask::output)
     }
 }
 

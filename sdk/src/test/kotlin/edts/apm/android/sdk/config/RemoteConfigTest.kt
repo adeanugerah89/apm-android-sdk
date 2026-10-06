@@ -21,7 +21,7 @@ class RemoteConfigTest {
         assertTrue(config.enabled)
         assertEquals(1.0, config.sampling.network, 0.0)
         assertEquals(200, config.maxBatch)
-        assertEquals(30L, config.uploadIntervalS)
+        assertEquals(30.0, config.uploadIntervalS, 0.0)
         assertTrue(config.disabledFeatures.isEmpty())
     }
 
@@ -30,7 +30,7 @@ class RemoteConfigTest {
 
         assertFalse(config.enabled)
         assertEquals(RemoteConfig.DEFAULT.maxBatch, config.maxBatch)
-        assertEquals(RemoteConfig.DEFAULT.uploadIntervalS, config.uploadIntervalS)
+        assertEquals(RemoteConfig.DEFAULT.uploadIntervalS, config.uploadIntervalS, 0.0)
         assertEquals(RemoteConfig.DEFAULT.sampling, config.sampling)
     }
 
@@ -54,13 +54,13 @@ class RemoteConfigTest {
         val sane = RemoteConfig(
             sampling = RemoteConfig.Sampling(network = 5.0, breadcrumb = -1.0),
             maxBatch = 0,
-            uploadIntervalS = -30
+            uploadIntervalS = -30.0
         ).sanitized()
 
         assertEquals(RemoteConfig.DEFAULT.sampling.network, sane.sampling.network, 0.0)
         assertEquals(RemoteConfig.DEFAULT.sampling.breadcrumb, sane.sampling.breadcrumb, 0.0)
         assertEquals(RemoteConfig.DEFAULT.maxBatch, sane.maxBatch)
-        assertEquals(RemoteConfig.DEFAULT.uploadIntervalS, sane.uploadIntervalS)
+        assertEquals(RemoteConfig.DEFAULT.uploadIntervalS, sane.uploadIntervalS, 0.0)
     }
 
     @Test fun `sanitized leaves in-range values untouched and never resurrects the kill switch`() {
@@ -68,13 +68,13 @@ class RemoteConfigTest {
             enabled = false,
             sampling = RemoteConfig.Sampling(network = 0.25, breadcrumb = 0.0),
             maxBatch = 50,
-            uploadIntervalS = 15
+            uploadIntervalS = 15.0
         ).sanitized()
 
         assertFalse(sane.enabled)
         assertEquals(0.25, sane.sampling.network, 0.0)
         assertEquals(0.0, sane.sampling.breadcrumb, 0.0)
         assertEquals(50, sane.maxBatch)
-        assertEquals(15L, sane.uploadIntervalS)
+        assertEquals(15.0, sane.uploadIntervalS, 0.0)
     }
 }

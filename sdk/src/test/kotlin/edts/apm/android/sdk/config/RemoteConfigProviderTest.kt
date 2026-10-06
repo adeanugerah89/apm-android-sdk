@@ -83,4 +83,92 @@ class RemoteConfigProviderTest {
         assertTrue(provider.isEnabled)
         assertTrue(s.read()!!.enabled)
     }
+
+    // ─── A31 · upload_interval_s ───────────────────────────────────────────────
+
+    @Test fun `the host's interval stands until the server has spoken`() {
+        val provider = RemoteConfigProvider(store(), FakeFetcher(ConfigFetchResult.Failure(null)))
+        provider.loadFromCache()   // no cache
+
+        // The compiled-in default is also 30 s; a host that chose 90 s must not be reset to it.
+        assertEquals(90_000L, provider.uploadIntervalMs(hostDefaultMs = 90_000L))
+    }
+
+    @Test fun `a cached server interval wins over the host's, with no network`() {
+        val s = store()
+        s.write(RemoteConfig(uploadIntervalS = 120.0))
+        val provider = RemoteConfigProvider(s, FakeFetcher(ConfigFetchResult.Failure(null)))
+
+        provider.loadFromCache()
+
+        assertEquals(120_000L, provider.uploadIntervalMs(hostDefaultMs = 90_000L))
+    }
+
+    @Test fun `a live fetch takes over, in either direction`() {
+        val provider = RemoteConfigProvider(store(), FakeFetcher(ConfigFetchResult.Success(RemoteConfig(uploadIntervalS = 10.0))))
+        assertEquals("before the fetch", 90_000L, provider.uploadIntervalMs(90_000L))
+
+        provider.refresh()
+
+        assertEquals("faster than the host asked", 10_000L, provider.uploadIntervalMs(90_000L))
+    }
+
+    @Test fun `a failed refresh does not hand the interval back to the host`() {
+        val s = store()
+        s.write(RemoteConfig(uploadIntervalS = 120.0))
+        val provider = RemoteConfigProvider(s, FakeFetcher(ConfigFetchResult.Failure(500)))
+        provider.loadFromCache()
+
+        provider.refresh()
+
+        assertEquals(120_000L, provider.uploadIntervalMs(hostDefaultMs = 90_000L))
+    }
+
+    @Test fun `a fractional server interval converts to milliseconds without losing the fraction`() {
+        val s = store()
+        s.write(RemoteConfig(uploadIntervalS = 45.5))
+        val provider = RemoteConfigProvider(s, FakeFetcher(ConfigFetchResult.Failure(null)))
+        provider.loadFromCache()
+
+        assertEquals(45_500L, provider.uploadIntervalMs(hostDefaultMs = 90_000L))
+    }
+
+    // ─── review finding 2 · a config that arrived over the unpinned recovery path ────────────────
+
+    private fun viaFallback(config: RemoteConfig) = ConfigFetchResult.Success(config, viaUnpinnedFallback = true)
+
+    @Test fun `from the unpinned path only 'switch pinning off' is honoured - nothing else`() {
+        val provider = RemoteConfigProvider(store(), FakeFetcher(viaFallback(RemoteConfig(
+            enabled = false, maxBatch = 5, uploadIntervalS = 999.0, disabledFeatures = listOf("pinning", "network", "crash")
+        ))))
+
+        provider.refresh()
+
+        assertTrue(provider.config.isDisabled(RemoteConfig.Feature.PINNING))
+        assertTrue("a man-in-the-middle must not also be able to kill the SDK", provider.isEnabled)
+        assertFalse("nor switch off capture", provider.config.isDisabled(RemoteConfig.Feature.NETWORK))
+        assertFalse(provider.config.isDisabled(RemoteConfig.Feature.CRASH))
+        assertEquals(RemoteConfig.DEFAULT.maxBatch, provider.config.maxBatch)
+    }
+
+    @Test fun `a config from the unpinned path is never written to the cache - a restart retries the pinned path`() {
+        val s = store()
+        val provider = RemoteConfigProvider(s, FakeFetcher(viaFallback(RemoteConfig(disabledFeatures = listOf("pinning")))))
+
+        provider.refresh()
+
+        assertNull(s.read())
+        // And it does not count as the server having spoken, so the host's own interval is not overridden.
+        assertEquals(90_000L, provider.uploadIntervalMs(hostDefaultMs = 90_000L))
+    }
+
+    @Test fun `an ordinary successful fetch is still cached and applied in full`() {
+        val s = store()
+        val provider = RemoteConfigProvider(s, FakeFetcher(ConfigFetchResult.Success(RemoteConfig(enabled = false, maxBatch = 10))))
+
+        provider.refresh()
+
+        assertFalse(provider.isEnabled)
+        assertEquals(10, s.read()!!.maxBatch)
+    }
 }

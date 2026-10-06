@@ -3,6 +3,7 @@ package edts.apm.android.sdk.manual
 import edts.apm.android.sdk.breadcrumb.BreadcrumbCategory
 import edts.apm.android.sdk.breadcrumb.BreadcrumbLevel
 import edts.apm.android.sdk.breadcrumb.BreadcrumbRingBuffer
+import edts.apm.android.sdk.breadcrumb.putBreadcrumbSnapshot
 import edts.apm.android.sdk.core.Event
 import edts.apm.android.sdk.core.EventContext
 import edts.apm.android.sdk.core.EventType
@@ -35,6 +36,9 @@ class ManualApi(
     /** MOB-28 */
     fun setUser(id: String) = userIdProvider.setUser(id)
 
+    /** A41/A39: the host signed the user out. */
+    fun clearUser() = userIdProvider.clearUser()
+
     /** MOB-11 */
     fun breadcrumb(message: String, category: BreadcrumbCategory, level: BreadcrumbLevel = BreadcrumbLevel.INFO) =
         breadcrumbs.record(message, category, level)
@@ -52,7 +56,7 @@ class ManualApi(
             put("source_function", callSite.function)
             put("source_line", callSite.line)
             // MOB-13: ring buffer snapshot attached to every error, chronological oldest-first.
-            put("breadcrumbs", breadcrumbs.snapshot())
+            putBreadcrumbSnapshot(breadcrumbs.snapshot())
             extra.entries.take(MAX_CUSTOM_KEYS).forEach { (key, value) ->
                 put("custom.$key", value.take(MAX_CUSTOM_VALUE_LENGTH))
             }

@@ -1,6 +1,7 @@
 package edts.apm.android.sdk.crash
 
 import android.os.SystemClock
+import edts.apm.android.sdk.breadcrumb.putBreadcrumbSnapshot
 import edts.apm.android.sdk.core.Event
 import edts.apm.android.sdk.core.EventContext
 import edts.apm.android.sdk.core.EventType
@@ -33,7 +34,13 @@ class JvmCrashHandler(
     private val appPackagePrefix: String,
     private val launchElapsedRealtimeMs: Long,
     private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime,
-    private val defaultHandler: Thread.UncaughtExceptionHandler? = Thread.getDefaultUncaughtExceptionHandler()
+    private val defaultHandler: Thread.UncaughtExceptionHandler? = Thread.getDefaultUncaughtExceptionHandler(),
+    /**
+     * MOB-13: returns the ring-buffer snapshot to attach as `breadcrumbs` (`01` §4.5.1). The buffer
+     * lives in this process's memory, so it is only meaningful here — the process that crashed is
+     * the one writing the event. `null` (the default) attaches nothing.
+     */
+    private val breadcrumbsProvider: (() -> String)? = null
 ) : Thread.UncaughtExceptionHandler {
 
     private val json = Json { encodeDefaults = true }
@@ -56,6 +63,8 @@ class JvmCrashHandler(
     private fun writeCrashEvent(thread: Thread, throwable: Throwable) {
         val threads = JvmStackTraceMapper.map(Thread.getAllStackTraces(), thread, appPackagePrefix)
         val ctx = contextProvider()
+        // A failing snapshot must cost us the breadcrumbs, never the crash report itself.
+        val crumbs = try { breadcrumbsProvider?.invoke() } catch (e: Throwable) { null }
 
         val attrs = buildJsonObject {
             put("crash_type", "exception")
@@ -66,6 +75,7 @@ class JvmCrashHandler(
             put("binary_images", JsonArray(emptyList()))  // nothing to symbolicate for a JVM crash
             ctx.appState?.let { put("app_state", it) }
             put("time_since_launch_ms", elapsedRealtime() - launchElapsedRealtimeMs)
+            crumbs?.let { putBreadcrumbSnapshot(it) }
         }
 
         val event = Event(

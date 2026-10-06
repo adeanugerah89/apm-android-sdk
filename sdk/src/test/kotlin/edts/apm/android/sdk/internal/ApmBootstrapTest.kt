@@ -35,8 +35,8 @@ class ApmBootstrapTest {
 
     @After fun tearDown() {
         ApmRuntime.reset()
-        File(app.filesDir, "apm-queue").deleteRecursively()
-        File(app.filesDir, "apm-remote-config.json").delete()
+        SdkStorage.queueDir(app).deleteRecursively()
+        SdkStorage.configCache(app).delete()
     }
 
     private fun config(
@@ -72,7 +72,7 @@ class ApmBootstrapTest {
         ApmRuntime.current!!.manualApi.logError(IllegalStateException("boom"))
         assertTrue(ApmRuntime.current!!.awaitCaptureDrain(5_000))
 
-        val files = File(app.filesDir, "apm-queue").listFiles()!!.filter { it.name.endsWith(".evt") }
+        val files = SdkStorage.queueDir(app).listFiles()!!.filter { it.name.endsWith(".evt") }
         assertEquals(1, files.size)
         assertTrue(files.single().length() > 0)
     }
@@ -100,7 +100,7 @@ class ApmBootstrapTest {
         val before = components.queue.stats().eventCount
 
         // Simulate a fetched kill switch by writing it through the same provider the gate reads.
-        val store = edts.apm.android.sdk.config.RemoteConfigStore(File(app.filesDir, "apm-remote-config.json"))
+        val store = edts.apm.android.sdk.config.RemoteConfigStore(SdkStorage.configCache(app))
         store.write(edts.apm.android.sdk.config.RemoteConfig(enabled = false))
         components.remoteConfig.loadFromCache()
 

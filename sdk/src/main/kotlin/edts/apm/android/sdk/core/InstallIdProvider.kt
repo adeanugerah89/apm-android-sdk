@@ -5,7 +5,9 @@ import java.util.UUID
 
 /**
  * Provides a stable install_id — generated once, persisted in SharedPreferences.
- * Survives app restarts; cleared on uninstall (SharedPreferences are wiped on uninstall).
+ * Survives app restarts and app updates. It is kept in the SDK's no-backup state file, so — unlike an
+ * ordinary SharedPreferences value — a reinstall or a backup restore onto another device does NOT bring
+ * it back: `01` §2 says it resets with the install (A40).
  * NOT a user identifier — the SDK treats it as an installation token only. (§2)
  */
 class InstallIdProvider(private val prefs: SharedPreferences) {

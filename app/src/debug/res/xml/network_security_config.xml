@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG BUILD ONLY — lives in src/debug/, so it can never reach a release APK.
+
+  Trusts one bundled self-signed certificate so the verification app can talk to a local HTTPS
+  ingest server running on the developer's machine (10.0.2.2 from inside the emulator).
+
+  This exists to close manual checklist item 15: the upload path — peek → envelope → gzip → TLS →
+  response → delete-after-2xx — had never once run on a device. SEC-12 forbids cleartext, so
+  testing it locally requires a certificate the app actually trusts; there is no cleartext shortcut
+  and there should not be one.
+
+  System CAs stay trusted, so everything else behaves normally.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/apm_local_test_ca" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

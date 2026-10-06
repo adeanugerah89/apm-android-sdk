@@ -117,7 +117,7 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 | Field | Keterangan |
 |---|---|
 | `event_id` | UUID v4. **Kunci deduplikasi di backend** — pengiriman bersifat *at-least-once*, event yang sama bisa datang dua kali. |
-| `seq` | Counter monotonik per sesi. Dipakai backend untuk mengurutkan event ketika jam device tidak akurat. |
+| `seq` | Counter monotonik per sesi. Dipakai backend untuk mengurutkan event ketika jam device tidak akurat. **Kualifikasi untuk `type: "crash"`** (APMKit 0.0.8+): SDK memulihkan `session_id` sebuah crash dari sesi yang benar-benar mengalaminya (lewat KSCrash user-info, ditulis sebelum proses mati), tapi `seq`-nya tetap berasal dari counter sesi PELAPOR (sesi baru yang membaca laporan crash tertunda saat proses berikutnya start) — objek `SessionManager` milik sesi yang crash sudah lenyap bersama prosesnya, sehingga counter aslinya tidak bisa dipulihkan. Akibatnya, untuk event `type: "crash"`, `seq` **tidak sebanding** dengan `seq` event lain yang berbagi `session_id` yang sama — jangan diasumsikan ikut deret monotonik sesi tersebut. Backend/dashboard yang mengurutkan event dalam satu sesi sebaiknya memakai `ts_client` untuk baris `crash`, bukan `seq`. |
 | `ts_client` | Waktu dari device. **Tidak boleh dipercaya sebagai sumber kebenaran** — backend menyimpan `ts_server` terpisah (BE-05). |
 | `ctx` | Konteks volatil yang bisa berubah dalam satu sesi. |
 
@@ -169,6 +169,8 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 | `binary_images` | Daftar binary yang dimuat + UUID — **wajib** untuk symbolication; bentuknya di §4.3.2 |
 | `app_state` | State saat crash |
 | `time_since_launch_ms` | int |
+
+> **`is_fatal=false` dikecualikan dari crash-free rate — prinsip yang sama dengan §4.7, diperluas.** Alasan `termination` bukan `crash` (§4.7: "Menghitungnya sebagai crash membuat crash-free rate buruk secara palsu") berlaku kata-demi-kata untuk `crash_type` apa pun di bawah `type: "crash"` yang `is_fatal`-nya `false` — misalnya `hang` yang pulih sendiri tanpa mematikan proses. Backend **wajib** mengecualikan baris `is_fatal=false` dari penghitung `crash_sessions`/`crash_users` (metrik crash-free), bukan hanya baris `type='termination'`. Baris `type='crash'` yang tidak punya `is_fatal` sama sekali (event lama, sebelum field ini ada) dihitung **sebagai fatal** — default yang menganggap tak-fatal akan diam-diam membuang crash sungguhan dari metrik, kegagalan yang jauh lebih buruk daripada memasukkan satu hang yang semestinya dikecualikan. Ditemukan 2026-10-01 dari data pilot nyata: KSCrash Watchdog yang tidak dijeda saat app di-background menghasilkan `crash_type: hang, is_fatal: false` persis pada siklus background/foreground, sebelum celah ini ditutup (lihat `FEATURES.md` APMKit, parked item, untuk perbaikan di sisi SDK yang masih tertunda).
 
 #### 4.3.1 Bentuk `threads`
 
@@ -261,6 +263,73 @@ Urutan array kronologis: entri terakhir adalah yang paling dekat dengan kejadian
 
 > Alasan bentuknya string, bukan array bersarang: dengan menjadi satu atribut string biasa, snapshot ini otomatis melewati lapisan scrubbing yang sama dengan atribut lain (SEC-05) tanpa perlu jalur khusus. Pesan breadcrumb ditulis developer, jadi ia termasuk jalur kebocoran PII yang paling sering.
 
+#### 4.5.2 Integritas payload breadcrumb
+
+Karena `breadcrumbs` adalah string yang perlu di-decode sekali lagi (§4.5.1), ia punya
+mode kegagalan yang tidak dimiliki atribut lain: **string-nya bisa sampai dalam keadaan
+tidak bisa di-parse.** Kontrak ini mewajibkan mode itu ditangani secara eksplisit.
+
+**Wajib: gagal parse ≠ breadcrumb kosong.** Keduanya adalah keadaan yang berbeda dan
+tidak boleh diruntuhkan menjadi satu nilai. Sesi bersih memang tidak punya breadcrumb
+secara desain (§10), sehingga "kosong" adalah keadaan sah dan sering terjadi — justru
+karena itu, konsumen yang menampilkan payload rusak sebagai "kosong" akan menyembunyikan
+kerusakan di balik keadaan yang wajar, dan kerusakan itu tidak akan pernah terlihat.
+
+Setiap konsumen yang men-decode `breadcrumbs` **wajib**:
+
+| Keadaan | Kewajiban |
+|---|---|
+| Atribut tidak ada, atau array kosong | Laporkan sebagai kosong — ini normal, bukan anomali |
+| Decode berhasil | Laporkan sebagai utuh, sertakan isinya |
+| Decode gagal | Laporkan sebagai **rusak**, dengan nilai yang berbeda dari "kosong". String mentahnya **dipertahankan**, tidak dibuang |
+
+Melempar exception lalu mengembalikan `null`/`[]` tanpa penanda apa pun **melanggar
+kontrak ini**, sekalipun tidak ada yang crash.
+
+Bentuk pelaporannya di Read API ada di §10 (`breadcrumbs_status`).
+
+**Batas ukuran & perilaku pemotongan — ditetapkan 2026-09-25.**
+
+Ada DUA batas berbeda di sini, yang sempat tertukar dalam pengamatan lama (diarsipkan di
+bawah) — sekarang dibedakan eksplisit:
+
+- **Kapasitas ring buffer** (`02-Mobile-SDK.md` MOB-13): 100 entri breadcrumb terakhir yang
+  disimpan di memori app. Ini soal berapa banyak breadcrumb yang app tahu, bukan berapa
+  banyak yang dikirim.
+- **Budget encoder** (APMKit `CrashBreadcrumbEncoder.maxEncodedBytes`,
+  `Sources/APMKit/Crash/CrashBreadcrumbEncoder.swift:32`): 1000 byte — margin di bawah cap
+  1024 byte milik KSCrash sendiri (`KSUSERINFO_MAX_STRING_LENGTH`,
+  `KSCrashMonitor_UserInfo.c:41`) untuk string yang di-mirror ke crash report. Ini soal
+  berapa banyak isi ring buffer yang MUAT dikirim tanpa memicu truncation upstream yang
+  merusak JSON.
+
+Sesi terverifikasi 2026-09-25 memuat 39 crumb di ring buffer (di bawah kapasitas 100 — ring
+buffer tidak membuang apa pun di sesi ini) dan hanya 8 yang muat dalam budget 1000 byte
+tersebut; 31 dibuang oleh budget encoder, bukan oleh kapasitas ring buffer. Pembuangan
+dilakukan SDK sendiri, newest-first (crumb tertua dibuang lebih dulu) — bukan oleh KSCrash.
+
+#### `breadcrumbs_dropped`
+
+Field pendamping `breadcrumbs`, dikirim terpisah dari payload breadcrumb itu sendiri.
+
+| Aspek | Kontrak |
+|---|---|
+| Tipe & asal | Ditulis SDK sebagai **string** (KVS milik KSCrash hanya menerima string), di-coerce ke integer satu kali di titik baca (`apm-ingest/readapi.py`'s `_parse_breadcrumbs_dropped`). Konsumen lain wajib melakukan coercion yang sama di satu titik, bukan di tiap pemanggil. |
+| Makna | Jumlah crumb yang dibuang oleh **budget encoder** di atas sebelum upload — BUKAN oleh kapasitas ring buffer. Ring buffer men-drop crumb tertua secara diam-diam jauh sebelum crash terjadi (perilaku normalnya, di luar hitungan ini); field ini hanya menghitung apa yang dibuang SDK saat mem-budget sisa crumb untuk crash report. |
+| Tiga keadaan | (1) **Angka, termasuk 0** — 0 ditulis eksplisit setiap kali tidak ada yang dibuang, tidak pernah diomit. (2) **null karena field tidak ada** — SDK dari sebelum perbaikan buffer crash (APMKit `cfc5aedd`) tidak pernah mengirim field ini. (3) **null karena tidak bisa di-parse** — nilai hadir tapi bukan integer valid, diduga kerusakan pipeline. **(2) dan (3) berasal dari sebab berbeda dan tidak boleh diruntuhkan menjadi satu "null".** |
+| Hubungan dengan §4.5.1 | §4.5.1 menetapkan crumb yang TERSIMPAN tetap urut kronologis, tua ke baru. Yang DIBUANG untuk mencapai itu adalah crumb **tertua** — kebalikan dari intuisi "yang terbaru pasti dibuang duluan". Ditulis eksplisit karena kontra-intuitif dan pernah salah dinyatakan.
+
+**Pengamatan lama, diarsipkan sebagai konteks historis (bukan lagi TBD):**
+
+- Pada data pilot lama, `breadcrumbs` pernah teramati sampai dalam keadaan terpotong di
+  tengah array sehingga tidak bisa di-parse — inilah bug yang bagian ini sekarang perbaiki.
+- Titik potong yang teramati saat itu (~1024 / 567 / 456 karakter) berasal dari database
+  yang sudah dihapus dan tidak bisa diperiksa ulang. Rantai sebab di atas menjelaskan
+  MENGAPA truncation terjadi dan mengapa ia merusak JSON, tapi angka 567/456 itu sendiri
+  tidak rekonsiliasi dengan cap 1024 byte KSCrash di bawah mekanisme manapun yang bisa
+  ditelusuri — lihat koreksi 2026-09-25 di `APMKit/FEATURES.md` untuk detailnya. Dicatat
+  sebagai pertanyaan terbuka, bukan fakta yang sudah selesai.
+
 ### 4.6 `lifecycle` / `performance`
 
 | Atribut | Keterangan |
@@ -269,6 +338,10 @@ Urutan array kronologis: entri terakhir adalah yang paling dekat dengan kejadian
 | `duration_ms` | Untuk cold start: waktu sampai frame pertama |
 
 > `state: terminate` berarti aplikasi ditutup secara normal dan teramati **saat itu juga**. Proses yang mati mendadak tanpa sempat melapor adalah hal berbeda — lihat §4.7.
+
+> **Celah ditemukan 2026-10-02: kontrak mendefinisikan lima `state`, SDK hanya pernah mengirim satu — dan bahkan itu pun opsional.** `warm_start`, `foreground`, `background`, `terminate` tidak punya kode pengirim sama sekali di APMKit (digrep di seluruh `Sources/APMKit/`, nihil) — hanya `cold_start` yang diimplementasikan (`ColdStartTracker.swift:51-55`), dan itu pun **host-invoked by design, not automatic** (`ColdStartTracker.swift:9`): SDK hanya menyediakan `recordFirstFrame(sink:sessionManager:)`, aplikasi host yang harus memanggilnya dari titik "first frame" miliknya sendiri. Pilot `edts-klikidm-ios` tidak pernah memanggilnya (digrep, nihil). Akibatnya **tidak ada satu pun event `type: "lifecycle"` yang pernah tercatat di database pilot** — dikonfirmasi langsung: `SELECT type, COUNT(*) FROM events GROUP BY type` hanya mengembalikan `crash`/`error`, tidak pernah `lifecycle`. Empat nilai `state` ini kelas MOB-01 (kontrak menjanjikan nilai yang sah, kode tidak pernah memenuhinya untuk keempatnya) — lihat §10's catatan `crash_free_sessions` untuk konsekuensinya pada metrik headline, dan `apm-docs/00-Overview.md` §11 untuk keputusan cakupan produk yang masih terbuka soal ini.
+>
+> **Ditutup sebagian, APMKit 0.0.9 (revisi):** `foreground` sekarang dikirim otomatis oleh SDK sendiri (bukan host-invoked) — khusus untuk menutup celah penyebut `crash_free_sessions`/`crash_free_users` di §10 — tapi **BUKAN saat `APM.start()`/app launch**. `didFinishLaunchingWithOptions` (tempat `start()` dipanggil) juga berjalan untuk proses yang diluncurkan murni di background (silent push `content-available`, background fetch); mengirim di titik itu akan menghitung sesi yang tidak pernah benar-benar dipakai ke penyebut, membuat crash-free rate terlihat terlalu bagus — kebalikan dari celah yang paragraf di atas gambarkan, tapi tetap sebuah kebohongan. Titik kirimnya sekarang: **saat sesi itu PERTAMA KALI benar-benar teramati di foreground** (`UIApplication.didBecomeActiveNotification`, bukan `willEnterForeground` — yang terakhir tidak pernah terpicu pada cold launch langsung ke foreground) atau saat `SessionManager` merotasi ke sesi baru (rotasi itu sendiri ADALAH kembali ke foreground), mana pun yang lebih dulu untuk `session_id` tersebut — dijaga satu-per-`session_id`, jadi tidak ada duplikasi dari urutan panggilan. **Konsekuensi yang disengaja: proses yang diluncurkan di background dan tidak pernah dibuka pengguna tidak mengirim apa pun, dan tidak pernah masuk ke penyebut manapun di §10** — ini bukan efek samping, ini seluruh alasan titik kirimnya dipindah. **Sesi pertama sebuah app (begitu benar-benar di foreground) mengirim `state: "foreground"`, BUKAN `state: "cold_start"`** — `cold_start` tetap host-invoked dan opsional seperti sebelumnya (lihat paragraf di atas), jadi pembaca tidak boleh menyimpulkan `cold_start` selalu terkirim untuk launch pertama. `warm_start`, `background`, `terminate` masih belum punya kode pengirim sama sekali.
 
 ### 4.7 `termination` — proses mati tanpa crash
 
@@ -283,7 +356,7 @@ Ditemukan **retrospektif saat peluncuran berikutnya**: proses sebelumnya mati ta
 
 > **Kenapa `unexplained` dibuang.** Kategori itu didominasi perilaku normal: user menggeser app dari app switcher, developer menekan Stop di Xcode, atau rebuild. Sistem operasi tidak memberi informasi lebih setelah SIGKILL, sehingga terminasi semacam ini tidak bisa dibedakan dari penutupan biasa dan tidak punya nilai diagnostik. Mengirimnya hanya menghasilkan derau bervolume tinggi.
 >
-> **Kenapa bukan `crash`.** Proses yang dihentikan dari luar tidak punya stack trace, tidak disebabkan kode aplikasi, dan tidak bisa dicegah olehnya. Menghitungnya sebagai crash membuat crash-free rate buruk secara palsu — selama pengembangan hampir setiap sesi berakhir demikian. Temuan ini muncul dari run nyata pertama pada app pilot.
+> **Kenapa bukan `crash`.** Proses yang dihentikan dari luar tidak punya stack trace, tidak disebabkan kode aplikasi, dan tidak bisa dicegah olehnya. Menghitungnya sebagai crash membuat crash-free rate buruk secara palsu — selama pengembangan hampir setiap sesi berakhir demikian. Temuan ini muncul dari run nyata pertama pada app pilot. Prinsip yang sama (jangan hitung non-app-fault sebagai crash) sejak 2026-10-01 berlaku juga **di dalam** `type: "crash"` sendiri, untuk `is_fatal=false` — lihat catatan di §4.3.
 >
 > **Catatan paritas.** Android menghasilkan bentuk data yang setara lewat `ApplicationExitInfo` (`REASON_LOW_MEMORY` dan sejenisnya), jadi tipe event ini berlaku untuk kedua platform. Pemetaan nilai Android ke enum di atas ditetapkan saat port Android dikerjakan.
 
@@ -383,6 +456,8 @@ SDK mengambil konfigurasi remote saat startup, dengan cache lokal dan fallback k
 
 Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 
+> **Celah ditemukan 2026-10-02: penyebut `crash_free_sessions`/`crash_free_users` tidak pernah didefinisikan di kontrak ini.** `03-Backend.md` BE-16 dan `04-Frontend-Website.md` FE-01 menamai metriknya ("crash-free rate", "crash-free session rate") tapi tidak satu pun baris menyatakan populasi penyebutnya — bukan "seluruh sesi," bukan pula "sesi yang punya event lain." Implementasi (`apm-ingest/readapi.py`) diam-diam memilih `COUNT(DISTINCT session_id) FROM events` tanpa filter type — yaitu, penyebutnya adalah **sesi yang muncul di tabel `events` sama sekali**, bukan "seluruh sesi yang pernah berjalan." Karena §4.6 `lifecycle`'s empat `state` (`warm_start`/`foreground`/`background`/`terminate`) tidak pernah diimplementasikan dan `cold_start` hampir tidak pernah dipanggil (lihat catatan di §4.6), **sesi yang berjalan bersih (tidak ada crash, error, atau network request) tidak meninggalkan baris apa pun** — ia tidak pernah masuk hitungan sebagai sesi sama sekali, bukan dihitung sebagai "sesi sehat." Dikonfirmasi terhadap database pilot nyata: lima siklus pemakaian bersih berturut-turut (buka, pakai, tutup, tanpa crash/error disengaja) menghasilkan 0 baris; dari seluruh siklus pengujian, hanya sesi yang kebetulan memicu error/hang yang pernah muncul di `events`. Akibatnya `crash_free_sessions`/`crash_free_users` secara struktural **tidak bisa pernah mendekati nilai sehat** untuk app yang berperilaku normal — bukan karena crash-nya banyak, tapi karena sesi sehat tidak terlihat sama sekali oleh penyebutnya sendiri. Ini celah desain yang belum pernah diputuskan (bukan pelanggaran kontrak — tidak ada baris yang dilanggar, karena tidak ada baris yang pernah mendefinisikan ini), kelas yang sama dengan celah `is_fatal` yang ditutup 2026-10-01. Keputusan cakupan produk yang masih terbuka: `apm-docs/00-Overview.md` §11.
+
 | Endpoint | Fungsi |
 |---|---|
 | `GET /v1/apps` | Daftar app yang boleh diakses user |
@@ -401,14 +476,23 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 
 > **Breadcrumb pada timeline sesi — apa yang ada dan apa yang tidak.** Breadcrumb hidup di ring buffer memori perangkat dan **hanya ikut terkirim ketika ada `crash` atau `error`** (§4.5.1). Konsekuensinya:
 >
-> | Hasil sesi | `breadcrumbs` | `timeline` |
-> |---|---|---|
-> | `crashed` / `errors` | Terisi — jejak lengkap sebelum kejadian | Terisi |
-> | `clean` | **Kosong** — tidak pernah dikirim | Terisi |
+> | Hasil sesi | `breadcrumbs` | `breadcrumbs_status` | `timeline` |
+> |---|---|---|---|
+> | `crashed` / `errors` | Terisi — jejak lengkap sebelum kejadian | `ok` | Terisi |
+> | `clean` | **Kosong** — tidak pernah dikirim | `ok` | Terisi |
+> | payload gagal di-parse | **Kosong** — isinya tidak terbaca | `corrupt` | Terisi |
 >
 > Sesi bersih tidak punya breadcrumb **secara desain**, bukan karena datanya hilang. Mengirimkannya untuk setiap sesi akan melipatgandakan volume unggahan tanpa manfaat diagnostik — tidak ada yang perlu didiagnosa pada sesi yang berjalan normal.
 >
 > Karena itu setiap sesi juga membawa `timeline`, disusun dari event yang benar-benar tersimpan (request network, crash, error, termination, lifecycle). Untuk sesi bersih, inilah satu-satunya rekaman aktivitas yang tersedia — dan ia data nyata, bukan pengganti. Frontend memakai `breadcrumbs_available` untuk memilih tampilan, dan **tidak menampilkan hitungan breadcrumb pada sesi bersih**.
+>
+> **`breadcrumbs_status` — kenapa `breadcrumbs_available` saja tidak cukup.** `breadcrumbs_available` adalah boolean, sedangkan keadaan yang nyata ada tiga: terisi, kosong secara desain, dan **rusak** (§4.5.2). Payload yang gagal di-parse menghasilkan `breadcrumbs_available: false` — tidak bisa dibedakan dari sesi bersih yang memang tidak pernah mengirim breadcrumb. Karena "kosong" adalah keadaan yang sah dan sering, kerusakan jadi tidak terlihat sama sekali.
+>
+> Karena itu setiap respons yang memuat `breadcrumbs` **wajib** juga memuat `breadcrumbs_status` dengan nilai `ok` atau `corrupt`. Ini berlaku untuk `GET /v1/issues/{id}`, `GET /v1/issues/{id}/breadcrumbs`, dan tiap entri sesi pada `GET /v1/apps/{id}/users/{user_ref}`.
+>
+> `breadcrumbs_available` **tetap ada dan tidak berubah artinya** — penambahan ini bersifat aditif, konsumen lama tidak perlu diubah. Konsumen baru memakai `breadcrumbs_status` untuk membedakan rusak dari kosong.
+>
+> Ini penerapan langsung dari prinsip `04-Frontend-Website.md` §3.8: *jangan tampilkan "semua aman" untuk kondisi yang belum bisa dijawab.* `breadcrumbs_available: false` pada payload rusak adalah persis pelanggaran itu — tampak seperti sesi sehat tanpa breadcrumb, padahal datanya ada dan hilang terbaca.
 
 > **Blok `drilldown` pada endpoint network.** Diaktifkan dengan `&host=…` (opsional `&failure_category=…`) dan berisi, selain deret waktu per menit:
 >

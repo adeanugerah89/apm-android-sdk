@@ -15,15 +15,19 @@ Applies to SDK **0.1.0**.
 
 | Field | What it is | Source | Personal data? |
 |---|---|---|---|
-| `install_id` | Random UUID, generated on first run, stored in the app's own `SharedPreferences` | `UUID.randomUUID()` | No. Not tied to a person or device; a reinstall produces a new one. |
-| `user_id` | **Whatever string the host app passes to `APM.setUser()`** — commonly a phone number, email or internal user id | host app | **Yes, if the host app passes personal data.** See below. |
-| `user_id_source` | `host` if the app called `setUser`, `generated` otherwise | SDK | No |
-| `session_id` | Random UUID per session (foreground until 30 s in background) | `UUID.randomUUID()` | No |
+| `install_id` | Random UUID, generated on first run, stored in a file under the app's private `noBackupFilesDir` (not in `shared_prefs`) | `UUID.randomUUID()` | No. Not tied to a person or device. Kept in the SDK's no-backup state file, so a reinstall or a backup restore onto another device produces a **new** one; an app update keeps it. |
+| `user_id` | **Whatever string the host app passes to `APM.setUser()`** — commonly a phone number, email or internal user id. **Kept on the device**: the current value is stored once in the SDK's no-backup state, encrypted with the Android Keystore when it is available (a marked plaintext fallback otherwise), so it survives a restart. It is not written per event | host app | **Yes, if the host app passes personal data.** See below. |
+| `user_id_source` | `host` if the app called `setUser` (and not `clearUser`), `generated` otherwise | SDK | No |
+| `identity epoch` | An opaque random number that changes when the signed-in user changes. Stored with each queued event so a backlog is uploaded under the user it was captured under. **Not sent, and not the user id** | SDK | No |
+| `session_id` | Random UUID per session (foreground until 30 s in background). Stored with each queued event (inside the encrypted queue file) and the **latest one in the SDK's no-backup state file**, so a crash reported at the next launch is filed under the session it happened in | `UUID.randomUUID()` | No |
 
 **`user_id` is the one field that can carry personal data, and the SDK does not decide its
 contents — the adopting app does.** It is transmitted raw over TLS and hashed into `user_ref`
 server-side (BE-21); the raw value is not persisted by the backend. It is deliberately excluded from
-breadcrumbs, logs and every other field.
+breadcrumbs, logs and every other event field. **On the device it is stored once** (the current value,
+in app-private no-backup storage, encrypted when the Keystore is available — the same trade-off as the
+queue; if a key exists but one encryption fails, nothing is stored) so that `setUser` survives a restart; the previous value is kept only in memory for the life of the
+process, to upload a backlog under the right user.
 
 The SDK **never** reads IMEI, serial number, `ANDROID_ID`, advertising ID, phone number, contacts,
 location, or any permission-gated identifier. There is no code path that could — verifiable by
@@ -68,9 +72,11 @@ Attached to every event.
 | `host` | Hostname only |
 | `path` | **Normalised** — numeric and UUID-shaped segments become `{id}` before storage |
 | `method`, `protocol`, `status_code` | |
+| `tls_version`, `reused_connection` | Negotiated TLS version (e.g. `TLSv1.3`) and whether a pooled connection was reused. Environment facts, no personal data |
 | `duration_ms`, `dns_ms`, `tcp_ms`, `tls_ms`, `ttfb_ms` | Timings |
 | `req_bytes`, `res_bytes` | Sizes only |
-| `failure_category`, `error_domain`, `error_code`, `tls_phase_reached` | Failure classification |
+| `failure_category`, `tls_phase_reached` | Failure classification |
+| `error_domain`, `error_code`, `underlying_domain`, `underlying_code` | The failing exception's **class name** (e.g. `java.net.UnknownHostException`) and the OS `errno` when one was reported (`0` = none). Class names of platform exceptions only identify the kind of failure; the exception **message** is never sent |
 
 **Request and response bodies are never captured, and there is no option to enable it** (SEC-04).
 **No headers are captured** — `Authorization` and `Cookie` cannot leak because no header is recorded
@@ -79,7 +85,8 @@ at all. Query strings are not stored.
 ### `error` — from `APM.logError()`
 
 `name`, `message`, `handled`, `source_file`, `source_function`, `source_line`, a breadcrumb
-snapshot, and any `custom.*` fields the app supplies.
+snapshot (`breadcrumbs`, plus `breadcrumbs_dropped`, always `0` on Android), and any `custom.*` fields
+the app supplies. A JVM `crash` event carries the same breadcrumb snapshot.
 
 `message` and `custom.*` are **written by the app's developers**, which makes them the most likely
 route for personal data to arrive by accident. Everything is scrubbed (§5), but the adopting team
@@ -107,10 +114,12 @@ Automatic breadcrumbs: screen changes, foreground/background, connectivity chang
 from `APM.breadcrumb()` and are developer-written text — scrubbed, but the same caution as `message`
 applies.
 
-### `lifecycle` / `performance` / `termination`
+### `lifecycle` / `termination`
 
-`state` (`cold_start`, `foreground`, `background`, …), `duration_ms`, `termination_reason`. No
-personal data.
+`lifecycle`: `state` (always `cold_start` today) and `duration_ms`. Foreground/background transitions
+are recorded as breadcrumbs, not as events. `termination`: `termination_reason`. No personal data.
+
+(The wire schema also lists a `performance` type, `01` §4.6; this SDK emits none.)
 
 ## 5. Redaction, before anything is stored
 
@@ -138,9 +147,18 @@ release build ignores the flag entirely — logcat is not a private channel and 
 never reach it.
 
 **On the device.** Events are written to the app's private internal storage
-(`filesDir/apm-queue`), excluded from auto-backup. Encrypted at rest with AES-GCM using a key held
+(`noBackupFilesDir/apm-queue`), which Android's Auto Backup always excludes, regardless of the host app's backup rules. Encrypted at rest with AES-GCM using a key held
 in the Android Keystore that never leaves it. If the Keystore is unavailable the SDK falls back to
 plaintext rather than losing telemetry — already-scrubbed data in app-private storage.
+
+Each queued event also records, next to it, **the session, app version/build and OS version it was captured
+under**. None of that is sent per event — it exists so that an event uploaded later (a backlog, or a crash
+reported after an app update) goes out under the values that were true when it happened. The app
+version/build and OS version of the running process are also kept in the SDK's no-backup state file so the
+next launch can attribute a crash to them. Non-personal, like every other field of this kind. The host's
+`setUser` value is **not** recorded per event: each event carries only a non-personal *identity epoch*, and at
+upload the SDK turns it back into the user who was signed in when it was captured — or, if that user is no
+longer known (an older era after a restart), the generated anonymous id, **never the user signed in now**.
 
 Bounded at **5 000 events or 20 MB**, whichever comes first; oldest are evicted. No time-based
 expiry, so an offline device retains events until capacity forces eviction.
@@ -200,8 +218,8 @@ advice; your privacy counsel makes the final call.
 | **Crash logs** | **Yes** — collected, transmitted off device | `crash` events, incl. stack traces |
 | **Diagnostics** | **Yes** | Network timings, ANR, cold start, `sdk.health` |
 | **Other app performance data** | **Yes** | Breadcrumbs, lifecycle, screen names |
-| **Device or other IDs** | Usually **no** | `install_id` is a random UUID scoped to your app, reset on reinstall. It is not an advertising ID, `ANDROID_ID`, IMEI or serial — the SDK reads none of those. Confirm against your own other SDKs. |
-| **Personal info → User IDs** | **Yes, if you call `APM.setUser()`** | Whatever string you pass is transmitted |
+| **Device or other IDs** | Usually **no** | `install_id` is a random UUID scoped to your app; it resets on reinstall because the SDK keeps it outside Auto Backup. It is not an advertising ID, `ANDROID_ID`, IMEI or serial — the SDK reads none of those. Confirm against your own other SDKs. |
+| **Personal info → User IDs** | **Yes, if you call `APM.setUser()`** | Whatever string you pass is transmitted, and the current value is kept on the device (encrypted when the Keystore allows) so it survives a restart |
 | **Personal info → Phone number / Email** | **Yes, if that is what you pass to `setUser()`** | The SDK does not inspect or restrict the value |
 | Location, contacts, photos, audio, files, calendar, health, financial | **No** | The SDK collects none of these and requests no runtime permission |
 
@@ -236,8 +254,15 @@ if option 2 above — which identifier is transmitted.
 
 ### iOS parity
 
-Teams shipping both platforms fill the App Store Connect privacy labels from this same inventory:
-the wire output is identical by design, so the answers are too.
+Teams shipping both platforms fill the App Store Connect privacy labels from the iOS inventory, not from
+this one. The wire output is meant to be identical, but **it is not yet**: as of 2026-10-02 (APMKit 0.0.7)
+iOS also sends, on `network` events, an allowlisted copy of the request and response headers
+(`req_headers` / `res_headers` — `Content-Type`, `Content-Length`, `Accept`, `User-Agent` only) and keeps the
+query-parameter *names* (values redacted) in `path`. **Android sends none of that:** no header and no query
+string ever reaches an event, so `Authorization` and `Cookie` cannot leak by construction (SEC-02, SEC-03),
+and a test pins it. Neither platform's attributes are read by the backend today. iOS also keeps the host's
+`user_id` in `UserDefaults` (which Auto Backup/iCloud includes), where Android keeps it in no-backup,
+Keystore-encrypted storage. These differences are the iOS team's to confirm or remove; see `FEATURES.md` A38.
 
 ---
 
@@ -246,7 +271,8 @@ the wire output is identical by design, so the answers are too.
 1. **`user_id` contents are the adopting app's choice.** If a team passes a phone number, personal
    data transits the ingest endpoint before being hashed. The claim that survives scrutiny is "not
    stored", not "never sent" — worth stating in that form.
-2. **`device.timezone`** is a coarse location signal. Retained because it is needed to interpret
+2. **The stored `user_id` is kept as readable text only when there is no Keystore key at all** (marked `p1:` in the state file), as the queue does; a key that exists but fails on one attempt stores nothing instead — so a phone number passed to `setUser` can sit in app-private, no-backup storage unencrypted on such a device. Not in any backup; still worth a reviewer's eye.
+3. **`device.timezone`** is a coarse location signal. Retained because it is needed to interpret
    timestamps, but a reviewer should see it listed.
 3. **Stack traces and developer-written messages** can carry personal data incidentally. Scrubbing
    is pattern-based, so it cannot be claimed as complete.

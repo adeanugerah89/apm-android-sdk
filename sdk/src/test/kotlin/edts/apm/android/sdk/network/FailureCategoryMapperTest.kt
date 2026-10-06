@@ -13,9 +13,16 @@ import javax.net.ssl.SSLPeerUnverifiedException
  */
 class FailureCategoryMapperTest {
 
-    @Test fun `pinning rejection takes priority over exception type`() {
-        val result = FailureCategoryMapper.map(SSLPeerUnverifiedException("bad cert"), isPinningRejection = true)
-        assertEquals(FailureCategory.SSL_PINNING_REJECTED, result)
+    @Test fun `OkHttp pin mismatch message maps to ssl_pinning_rejected`() {
+        // Shape of the message CertificatePinner.check throws. The real thing, produced by OkHttp
+        // through a live handshake, is covered by PinningRejectionTest.
+        val e = SSLPeerUnverifiedException("Certificate pinning failure!\n  Peer certificate chain:\n    sha256/...")
+        assertEquals(FailureCategory.SSL_PINNING_REJECTED, FailureCategoryMapper.map(e))
+    }
+
+    @Test fun `hostname mismatch is ssl_certificate, not pinning`() {
+        val e = SSLPeerUnverifiedException("Hostname example.com not verified")
+        assertEquals(FailureCategory.SSL_CERTIFICATE, FailureCategoryMapper.map(e))
     }
 
     @Test fun `SSLPeerUnverifiedException maps to ssl_certificate`() {

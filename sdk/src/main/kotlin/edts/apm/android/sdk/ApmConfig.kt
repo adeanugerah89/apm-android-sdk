@@ -26,8 +26,9 @@ data class ApmConfig(
      * they do not, rather than reshaping [ingestUrl] to make the guess work.
      */
     val configUrl: String = ingestUrl.substringBeforeLast("/v1/ingest") + "/v1/config",
-    // MOB-08: periodic sync trigger interval. `01` §9 config example default is 30s;
-    // may be overridden lower by GET /v1/config once A10 (remote control) lands.
+    // MOB-08: periodic sync trigger interval, used until the server has spoken. Once a remote config
+    // has been fetched or cached, its `upload_interval_s` (`01` §9) takes over — in either direction,
+    // because remote control has to be able to slow a fleet down as well as speed it up.
     val uploadIntervalMs: Long = 30_000L,
     val debugLogging: Boolean = false,
     // Cert pinning (A15, P2) — null = disabled, the default. The TLS floor (A11) applies either

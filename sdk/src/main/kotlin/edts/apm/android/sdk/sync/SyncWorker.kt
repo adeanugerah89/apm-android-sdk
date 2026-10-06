@@ -22,7 +22,8 @@ class SyncWorker @JvmOverloads constructor(
     context: Context,
     params: WorkerParameters,
     private val engineProvider: () -> SyncEngine? = { ApmRuntime.current?.syncEngine },
-    private val intervalProvider: () -> Long = { ApmRuntime.current?.uploadIntervalMs ?: DEFAULT_INTERVAL_MS }
+    private val intervalProvider: () -> Long = { ApmRuntime.current?.uploadIntervalMs?.invoke() ?: DEFAULT_INTERVAL_MS },
+    private val configRefresher: () -> Unit = { ApmRuntime.current?.remoteConfig?.refresh() }
 ) : Worker(context, params) {
 
     override fun doWork(): Result {
@@ -30,6 +31,19 @@ class SyncWorker @JvmOverloads constructor(
         // process before (or without) APM.start() ever being called. Nothing to drain, no
         // reschedule — a later start() will schedule again.
         val engine = engineProvider() ?: return Result.success()
+
+        // Refresh remote config before draining (MOB-20/21). Doing it here — rather than only at
+        // startup — is what makes the kill switch remote control rather than a launch-time setting:
+        // an app left running for hours would otherwise never see it. Already off the main thread,
+        // and a failure just leaves the previous config in force.
+        try {
+            configRefresher()
+        } catch (e: Throwable) {
+            // A config fetch failure must never stop the queue from draining.
+        }
+
+        // Read after the refresh, not before: this run's refresh may have just changed the interval,
+        // and reading it first would apply the new value one full cycle late.
         val uploadIntervalMs = intervalProvider()
 
         var outcome: SyncOutcome = SyncOutcome.Idle

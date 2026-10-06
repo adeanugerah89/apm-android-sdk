@@ -1,11 +1,14 @@
 package edts.apm.android.sdk.crash
 
+import edts.apm.android.sdk.breadcrumb.BreadcrumbCategory
+import edts.apm.android.sdk.breadcrumb.BreadcrumbRingBuffer
 import edts.apm.android.sdk.core.Event
 import edts.apm.android.sdk.core.EventContext
 import edts.apm.android.sdk.core.EventType
 import edts.apm.android.sdk.queue.EventQueue
 import edts.apm.android.sdk.queue.QueueStats
 import edts.apm.android.sdk.queue.QueuedEvent
+import edts.apm.android.sdk.scrub.ScrubbingEventQueue
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 import org.junit.Assert.*
@@ -29,7 +32,8 @@ class JvmCrashHandlerTest {
     private fun handler(
         queue: EventQueue,
         defaultHandler: Thread.UncaughtExceptionHandler,
-        elapsedNow: Long = 5_000L
+        elapsedNow: Long = 5_000L,
+        breadcrumbsProvider: (() -> String)? = null
     ) = JvmCrashHandler(
         queue = queue,
         seqProvider = { 1L },
@@ -37,7 +41,8 @@ class JvmCrashHandlerTest {
         appPackagePrefix = "com.example",
         launchElapsedRealtimeMs = 1_000L,
         elapsedRealtime = { elapsedNow },
-        defaultHandler = defaultHandler
+        defaultHandler = defaultHandler,
+        breadcrumbsProvider = breadcrumbsProvider
     )
 
     @Test fun `uncaughtException enqueues a CRASH event with the exception type and reason`() {
@@ -117,5 +122,68 @@ class JvmCrashHandlerTest {
         h.uncaughtException(thread, throwable)
 
         assertEquals(thread to throwable, defaultHandler.invokedWith)
+    }
+
+    // ─── A27 · MOB-13 / 01 §4.5.1: breadcrumbs on a crash ──────────────────────
+
+    @Test fun `a crash carries the breadcrumb snapshot, oldest first, with breadcrumbs_dropped 0`() {
+        val buffer = BreadcrumbRingBuffer()
+        buffer.record("opened cart", BreadcrumbCategory.NAVIGATION)
+        buffer.record("tapped pay", BreadcrumbCategory.USER_ACTION)
+        val queue = RecordingQueue()
+        val h = handler(queue, RecordingDefaultHandler(), breadcrumbsProvider = buffer::snapshot)
+
+        h.uncaughtException(Thread.currentThread(), RuntimeException("x"))
+
+        val attrs = queue.events.single().attrs
+        val crumbs = attrs.getValue("breadcrumbs").jsonPrimitive.content
+        assertTrue(crumbs.indexOf("opened cart") in 0 until crumbs.indexOf("tapped pay"))
+        // A string, not a number, and present even though nothing was dropped (`01` §4.5.2).
+        assertEquals("0", attrs.getValue("breadcrumbs_dropped").jsonPrimitive.content)
+        assertTrue(attrs.getValue("breadcrumbs_dropped").jsonPrimitive.isString)
+    }
+
+    @Test fun `an empty buffer still attaches an empty array rather than omitting the attribute`() {
+        val queue = RecordingQueue()
+        val h = handler(queue, RecordingDefaultHandler(), breadcrumbsProvider = BreadcrumbRingBuffer()::snapshot)
+
+        h.uncaughtException(Thread.currentThread(), RuntimeException("x"))
+
+        assertEquals("[]", queue.events.single().attrs.getValue("breadcrumbs").jsonPrimitive.content)
+    }
+
+    @Test fun `crash breadcrumbs go through the scrubber like every other attribute (SEC-05)`() {
+        val buffer = BreadcrumbRingBuffer()
+        buffer.record("OTP sent to 081234567890", BreadcrumbCategory.LOG)
+        val recorded = RecordingQueue()
+        // The same wrapper the production crash path uses (ApmBootstrap: Gated(Scrubbing(...))).
+        val h = handler(ScrubbingEventQueue(recorded), RecordingDefaultHandler(), breadcrumbsProvider = buffer::snapshot)
+
+        h.uncaughtException(Thread.currentThread(), RuntimeException("x"))
+
+        val crumbs = recorded.events.single().attrs.getValue("breadcrumbs").jsonPrimitive.content
+        assertFalse("raw phone number reached the queue: $crumbs", crumbs.contains("081234567890"))
+        assertTrue(crumbs.contains("[REDACTED]"))
+    }
+
+    @Test fun `a failing snapshot costs the breadcrumbs, not the crash report or the chain`() {
+        val queue = RecordingQueue()
+        val defaultHandler = RecordingDefaultHandler()
+        val h = handler(queue, defaultHandler, breadcrumbsProvider = { throw IllegalStateException("buffer broke") })
+
+        h.uncaughtException(Thread.currentThread(), RuntimeException("x"))
+
+        val attrs = queue.events.single().attrs
+        assertEquals("exception", attrs.getValue("crash_type").jsonPrimitive.content)
+        assertFalse(attrs.containsKey("breadcrumbs"))
+        assertNotNull(defaultHandler.invokedWith)
+    }
+
+    @Test fun `without a provider no breadcrumb attributes are written`() {
+        val queue = RecordingQueue()
+        handler(queue, RecordingDefaultHandler()).uncaughtException(Thread.currentThread(), RuntimeException("x"))
+
+        assertFalse(queue.events.single().attrs.containsKey("breadcrumbs"))
+        assertFalse(queue.events.single().attrs.containsKey("breadcrumbs_dropped"))
     }
 }

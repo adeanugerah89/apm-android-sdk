@@ -15,3 +15,7 @@ build/
 .externalNativeBuild
 .cxx
 local.properties
+.kotlin/
+tools/device-testing/server.key
+tools/device-testing/server.crt
+tools/device-testing/received.json

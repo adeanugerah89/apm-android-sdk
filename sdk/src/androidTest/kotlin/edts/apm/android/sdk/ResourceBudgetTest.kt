@@ -68,7 +68,7 @@ class ResourceBudgetTest {
             ApmRuntime.reset()
             // The queue directory is scanned at construction, so letting events pile up across
             // iterations would make later starts measure a bigger directory rather than the SDK.
-            File(context.filesDir, "apm-queue").deleteRecursively()
+            File(context.noBackupFilesDir, "apm-queue").deleteRecursively()
             val started = System.nanoTime()
             APM.start(context, config())
             samples.add((System.nanoTime() - started) / 1_000_000)

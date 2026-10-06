@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import androidx.annotation.RequiresApi
+import edts.apm.android.sdk.core.AppStamp
 import edts.apm.android.sdk.core.Event
 import edts.apm.android.sdk.core.EventContext
 import edts.apm.android.sdk.core.EventType
@@ -41,7 +42,27 @@ class NativeCrashReporter(
     private val queue: EventQueue,
     private val seqProvider: () -> Long,
     private val contextProvider: () -> EventContext,
-    private val maxRecords: Int = MAX_RECORDS
+    private val maxRecords: Int = MAX_RECORDS,
+    /**
+     * The session the previous process was in when it died (A28), read from storage before this
+     * process created its own. Applied only to the **newest** exit record — the one that is the
+     * process that just died. Older unreported records belong to sessions nobody remembers, so they
+     * stay unrecorded and fall back to the current session rather than being given a wrong one.
+     */
+    private val crashedSessionId: String? = null,
+    /**
+     * The app version/build and OS version the previous process was running (A39), applied to the same
+     * newest record as [crashedSessionId] and for the same reason: a crash reported after an app update
+     * must be filed under the version that crashed, not the one that is installed now.
+     */
+    private val crashedApp: AppStamp? = null,
+    /**
+     * The identity epoch the previous process ended in (A39) — same newest-record rule as [crashedSessionId].
+     * **Required, no default**: this runs on a background thread after the graph is published, so a host
+     * `setUser` can change the current epoch before it reads the tombstone, and no deterministic test can
+     * tell a forgotten argument from a correct one. Making it required turns that into a compile error.
+     */
+    private val crashedIdentityEpoch: Int?
 ) {
     private val json = Json { encodeDefaults = true }
 
@@ -60,12 +81,17 @@ class NativeCrashReporter(
         var newest = lastReported
         var emitted = 0
 
+        val newestExit = records.maxOfOrNull { it.timestamp }
+
         records
             .filter { it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE }
             .filter { it.timestamp > lastReported }
             .sortedBy { it.timestamp }
             .forEach { info ->
-                if (emit(info)) emitted++
+                val session = if (info.timestamp == newestExit) crashedSessionId else null
+                val app = if (info.timestamp == newestExit) crashedApp else null
+                val epoch = if (info.timestamp == newestExit) crashedIdentityEpoch else null
+                if (emit(info, session, app, epoch)) emitted++
                 if (info.timestamp > newest) newest = info.timestamp
             }
 
@@ -76,7 +102,7 @@ class NativeCrashReporter(
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun emit(info: ApplicationExitInfo): Boolean {
+    private fun emit(info: ApplicationExitInfo, sessionId: String?, app: AppStamp?, identityEpoch: Int?): Boolean {
         // Raw bytes: the trace is protobuf, and reading it through a Reader would decode it as
         // UTF-8 and silently destroy every byte that is not valid UTF-8.
         val bytes = try {
@@ -90,6 +116,12 @@ class NativeCrashReporter(
         val threads = tombstone.toCrashThreads()
         val images = tombstone.toBinaryImages()
 
+        // Deliberately NO `breadcrumbs` here (A27). This runs at the *next* launch: the crashing
+        // process's ring buffer died with it, and the one in memory now belongs to the new process.
+        // Attaching it would show the developer what happened *after* the crash as if it led up to
+        // it — worse than nothing. `01` §4.5.2 treats an absent attribute as "empty", which is
+        // honest. Recovering the real trail needs a snapshot persisted before the crash (open
+        // decision, see FEATURES.md A27).
         val attrs = buildJsonObject {
             put("crash_type", "signal")
             put("name", tombstone.signalName ?: "unknown")
@@ -107,10 +139,15 @@ class NativeCrashReporter(
                 type = EventType.CRASH,
                 // The tombstone's own crash time. This is reported at the next launch, and stamping
                 // it with the launch time would place every native crash at the wrong moment.
-                tsClient = tombstone.timestamp ?: Clock.nowIso8601(),
+                tsClient = TombstoneTimestamp.toIso8601(tombstone.timestamp) ?: Clock.iso8601(info.timestamp),
                 seq = seqProvider(),
                 attrs = attrs,
-                ctx = ctx
+                ctx = ctx,
+                sessionId = sessionId,
+                appVersion = app?.version,
+                appBuild = app?.build,
+                osVersion = app?.osVersion,
+                identityEpoch = identityEpoch
             )
         )
     }

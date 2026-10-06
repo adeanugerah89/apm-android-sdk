@@ -10,7 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 
-/** MOB-19 — cold start to first frame, emitted as `performance` / `state: cold_start` (`01` §4.6). */
+/** MOB-19 — cold start to first frame, emitted as `lifecycle` / `state: cold_start` (`01` §4.6), matching iOS. */
 class ColdStartTrackerTest {
 
     private class RecordingQueue : EventQueue {
@@ -35,13 +35,13 @@ class ColdStartTrackerTest {
         elapsedRealtime = { nowMs }
     )
 
-    @Test fun `emits a performance event with state cold_start and duration_ms`() {
+    @Test fun `emits a lifecycle event with state cold_start and duration_ms`() {
         val queue = RecordingQueue()
 
         assertEquals(850L, tracker(queue).onFirstFrame())
 
         val event = queue.events.single()
-        assertEquals(EventType.PERFORMANCE, event.type)
+        assertEquals(EventType.LIFECYCLE, event.type)
         assertEquals("cold_start", event.attrs.getValue("state").jsonPrimitive.content)
         assertEquals("850", event.attrs.getValue("duration_ms").jsonPrimitive.content)
     }
@@ -88,5 +88,17 @@ class ColdStartTrackerTest {
 
         assertNull(tracker(queue, enabled = { false }).onFirstFrame())
         assertTrue(queue.events.isEmpty())
+    }
+
+    @Test fun `on the wire the cold start is type lifecycle, the value iOS and the backend corpus use`() {
+        val queue = RecordingQueue()
+        tracker(queue).onFirstFrame()
+
+        val wire = kotlinx.serialization.json.Json { encodeDefaults = true }
+            .encodeToString(edts.apm.android.sdk.core.Event.serializer(), queue.events.single())
+
+        assertTrue(wire, wire.contains("\"type\":\"lifecycle\""))
+        assertFalse(wire, wire.contains("\"performance\""))
+        assertTrue(wire, wire.contains("\"state\":\"cold_start\""))
     }
 }

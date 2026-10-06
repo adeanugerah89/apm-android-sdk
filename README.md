@@ -44,6 +44,7 @@ before it touches disk, and nothing is deleted locally until the backend has ack
 | `docs/` | the product spec (`00` overview · `01` wire contract · `02` mobile SDK) |
 | `INTEGRATION.md` | how an app adopts the SDK |
 | `DATA-INVENTORY.md` | every field collected, and how to fill Play Data Safety |
+| `TESTING-ON-DEVICE.md` | how to run the device checklist, and why it matters |
 | `RELEASING.md` | how a version is published, and the release gates |
 | `CONSTITUTION.md` | binding rules and every dated decision, with reasons |
 | `FEATURES.md` | scope, status and the evidence behind each ✅ |

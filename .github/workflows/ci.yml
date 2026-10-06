@@ -23,6 +23,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # A step's own `env:` block is not visible to that step's `if:` — GitHub evaluates the condition
+    # first — so a condition written against step-level env is always false and the step silently never
+    # runs. For a release gate that is the worst possible bug: it looks configured and enforces nothing.
+    # So the condition reads a job-level flag.
+    #
+    # The flag is deliberately NOT a secret: just "are both configured". The secrets themselves live only
+    # in the env of the one step that uploads symbols. Putting them at job level would expose the CI token
+    # to every step — including third-party actions (checkout, Java and Gradle setup) and anything a build
+    # or test script prints.
+    env:
+      SYMBOLS_CONFIGURED: ${{ secrets.APM_SYMBOLS_URL != '' && secrets.APM_CI_TOKEN != '' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -56,14 +68,25 @@ jobs:
         run: ./verify.sh publish
 
       # `01` §8 is a release gate: "pipeline CI harus **gagal** jika upload symbol gagal."
-      # Runs only when the secrets exist, so pull requests from forks still build — but on a real
-      # release run the absence of secrets is itself a failure, because the task refuses to no-op.
+      #
+      # Skipped only when the secrets are not configured yet, so forks and pull requests still
+      # build. That exemption is itself announced by the step below — a gate that quietly does
+      # nothing is indistinguishable from one that is working, which is the failure `01` §8 warns
+      # about in the first place.
       - name: Symbol upload (release gate)
-        if: github.event_name == 'push' && env.APM_SYMBOLS_URL != ''
+        if: github.event_name == 'push' && env.SYMBOLS_CONFIGURED == 'true'
         env:
           APM_SYMBOLS_URL: ${{ secrets.APM_SYMBOLS_URL }}
           APM_CI_TOKEN: ${{ secrets.APM_CI_TOKEN }}
         run: ./gradlew :app:uploadSymbols
+
+      - name: Warn that the symbol gate is not configured
+        if: github.event_name == 'push' && env.SYMBOLS_CONFIGURED != 'true'
+        run: |
+          echo "::warning title=Symbol upload not configured::\
+          APM_SYMBOLS_URL / APM_CI_TOKEN are not set, so mapping.txt was not uploaded. \
+          Crash reports from a release build of this app will be unreadable (01 section 8). \
+          Add both as repository secrets to arm the gate."
 
       - name: Upload test results
         if: always()

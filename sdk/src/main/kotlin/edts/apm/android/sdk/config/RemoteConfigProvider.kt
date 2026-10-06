@@ -24,6 +24,14 @@ class RemoteConfigProvider(
 ) {
     private val current = AtomicReference(RemoteConfig.DEFAULT)
 
+    /**
+     * True once [current] holds something the server actually said — from the cache or from a live
+     * fetch — rather than the compiled-in [RemoteConfig.DEFAULT]. [RemoteConfig] cannot tell an
+     * absent `upload_interval_s` from an explicit `30`, so without this the default would silently
+     * overwrite whatever the host app configured, on every launch that has no network yet.
+     */
+    @Volatile private var hasServerValue = false
+
     /** The effective config right now. Never null; never throws. */
     val config: RemoteConfig get() = current.get()
 
@@ -31,11 +39,19 @@ class RemoteConfigProvider(
     val isEnabled: Boolean get() = current.get().enabled
 
     /**
+     * Seconds between upload cycles (`01` §9 `upload_interval_s`). Once the server has spoken, its
+     * value wins: this is remote control, and the operator needs to be able to slow a fleet down as
+     * well as speed it up. Until then [hostDefaultMs] — what the host app put in `ApmConfig` — stands.
+     */
+    fun uploadIntervalMs(hostDefaultMs: Long): Long =
+        if (hasServerValue) (current.get().uploadIntervalS * 1_000).toLong() else hostDefaultMs
+
+    /**
      * Seeds the in-memory value from the on-disk cache. Call once at startup, before any capture
      * component is installed. No-op when there is no usable cache.
      */
     fun loadFromCache(): RemoteConfig {
-        store.read()?.let { current.set(it) }
+        store.read()?.let { current.set(it); hasServerValue = true }
         return current.get()
     }
 
@@ -48,10 +64,20 @@ class RemoteConfigProvider(
      */
     fun refresh(): RemoteConfig {
         when (val result = fetcher.fetch()) {
-            is ConfigFetchResult.Success -> {
-                current.set(result.config)
-                store.write(result.config)
-            }
+            is ConfigFetchResult.Success ->
+                if (result.viaUnpinnedFallback) {
+                    // Came over the recovery path that skips the pin: take ONLY "switch pinning off", keep
+                    // everything else as it was, and do not cache it — a restart retries the pinned path.
+                    val base = current.get()
+                    val pinningOff = result.config.isDisabled(RemoteConfig.Feature.PINNING)
+                    if (pinningOff && !base.isDisabled(RemoteConfig.Feature.PINNING)) {
+                        current.set(base.copy(disabledFeatures = base.disabledFeatures + RemoteConfig.Feature.PINNING.key))
+                    }
+                } else {
+                    current.set(result.config)
+                    hasServerValue = true
+                    store.write(result.config)
+                }
             is ConfigFetchResult.Failure -> Unit  // keep whatever we already had
         }
         return current.get()

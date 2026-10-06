@@ -54,13 +54,19 @@ SDK yang di-embed ke aplikasi iOS & Android, bertugas menangkap event, menyimpan
 
 ### 3.1 Network Observability — Fase 1
 
+**Cakupan (koreksi 2026-09-29):** seluruh requirement di seksi ini berlaku **hanya** untuk request yang melewati `URLSession` hasil `APM.instrumentedSession(...)`. Request lewat `URLSession.shared` atau session lain milik aplikasi host **tidak tertangkap**, dan tidak ada jalur cadangan. "Tiap request" di MOB-02b dan requirement lain di bawah dibaca dengan cakupan ini sebagai konteksnya — bukan seluruh trafik aplikasi.
+
 | ID | Requirement | Prio |
 |---|---|---|
-| MOB-01 | Menangkap metrik seluruh HTTP request: URL, method, status, durasi, breakdown per fase (DNS/TCP/TLS/TTFB) | P0 |
+| MOB-01 | Menangkap metrik HTTP request: URL, method, status, durasi, breakdown per fase (DNS/TCP/TLS/TTFB) | P0 |
 | MOB-02 | Menangkap kegagalan network dan memetakannya ke `failure_category` (`01` §5) | P0 |
 | MOB-02b | Periksa `status_code` tiap request yang selesai: selalu emit event `network`; jika status ≥ 400, tambahan emit `network_failure` dengan `failure_category = http_error` + `status_code` (aturan lengkap `01` §4.2). `http_error` tidak dihitung sebagai kegagalan transport. | P0 |
 | MOB-03 | Membedakan penolakan pinning kustom dari pembatalan request biasa | P0 |
 | MOB-10 | Traffic SDK sendiri dikecualikan dari instrumentasi (mencegah loop tak berujung) | P0 |
+
+> **Kenapa penangkapan network di iOS bersifat per-session, bukan menyeluruh (MOB-01).** Fakta teknis: `URLSessionTaskDelegate` — mekanisme yang dipakai SDK ini — secara teknis hanya dapat menempel pada `URLSession` yang dibuat sendiri lewat inisialisasi eksplisit. Menangkap seluruh trafik aplikasi menuntut `URLProtocol` kustom atau method swizzling, yang keduanya merupakan interception global. **Pertanyaan terbuka:** tidak ada catatan di repo yang menjelaskan apakah mekanisme per-session ini dipilih justru untuk menghindari interception global — sejalan dengan penolakan swizzling di MOB-12 — atau memang tidak pernah diputuskan secara eksplisit sebagai perbandingan trade-off.
+>
+> Konsekuensinya paralel dengan MOB-12: cakupan data network bergantung pada disiplin aplikasi host memakai `APM.instrumentedSession()` untuk request-nya, sama seperti cakupan crumb navigasi MOB-12 bergantung pada host memanggil `recordScreen(_:)`. Dua keputusan ini menghasilkan trade-off yang sama. **Request yang tidak muncul di Network Explorer belum tentu bug SDK** — bisa jadi request itu memang tidak pernah lewat session ber-instrumen.
 
 **Catatan implementasi:**
 - **iOS:** `URLSessionTaskMetrics` memberi breakdown per fase, termasuk `secureConnectionStartDate`/`EndDate`. Handshake yang dimulai tapi tak pernah selesai = gagal di fase TLS.
@@ -100,7 +106,7 @@ SDK yang di-embed ke aplikasi iOS & Android, bertugas menangkap event, menyimpan
 >
 > Konsekuensinya: integrasi screen tracking adalah **satu-satunya langkah yang tidak nol-effort**, jadi harus ditulis menonjol di dokumen integrasi (MOB-25), bukan sebagai catatan kaki. Nama screen berasal dari developer → tetap wajib melewati Scrubber (SEC-05).
 >
-> **Catatan paritas:** perbedaan iOS vs Android di sini disengaja. Android punya `ActivityLifecycleCallbacks` yang resmi dan aman, jadi di sana screen tracking memang otomatis. Yang wajib identik adalah *output*-nya (event breadcrumb dengan `category: navigation`), bukan cara memicunya.
+> **Catatan paritas:** perbedaan iOS vs Android di sini disengaja. Android punya `ActivityLifecycleCallbacks` yang resmi dan aman, jadi di sana screen tracking memang otomatis. Yang wajib identik adalah *output*-nya (event breadcrumb dengan `category: navigation`), bukan cara memicunya. **Konsekuensinya:** cakupan crumb navigasi di iOS bergantung pada disiplin aplikasi host memanggil `recordScreen(_:)` — crumb navigasi yang hilang di suatu sesi iOS belum tentu bug SDK.
 
 ### 3.5 Crash Reporting — Fase 2
 

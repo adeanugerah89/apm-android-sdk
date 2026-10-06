@@ -133,6 +133,16 @@ object APM {
         safely { it.manualApi.setUser(id) }
     }
 
+    /**
+     * The user signed out: events from now on are no longer attributed to them. Call it on logout — without it
+     * the SDK cannot know the session ended, and anonymous activity would keep going out under the last user.
+     * Events captured *before* the call stay with the user they were captured under.
+     */
+    @JvmStatic
+    fun clearUser() {
+        safely { it.manualApi.clearUser() }
+    }
+
     /** Add a manual breadcrumb. (MOB-11) */
     @JvmStatic
     @JvmOverloads

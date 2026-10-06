@@ -997,3 +997,382 @@ apa pun tentang app yang sedang dijalankan developer.
 Diverifikasi di device dengan config yang sama persis: build debug mencetak satu baris per event;
 build release **nol baris**, sementara SDK tetap menangkap 7 event. Itu bentuk pengujian yang
 diminta requirement — bukan "flag-nya kami hormati", tapi "build release mengabaikannya".
+
+### 2026-09-09 · A13 selesai: rilis 0.1.0 ke GitHub Packages, dan pelajaran soal penyimpanan kredensial
+
+`edts.apm.android:apm-android-sdk:0.1.0` **live di GitHub Packages**
+(`https://maven.pkg.github.com/adeanugerah89/apm-android-sdk`) dan terbukti bisa ditarik proyek lain
+(362 155 byte AAR). Rantai penuh terverifikasi: gladi bersih SNAPSHOT → tarik sebagai konsumen →
+`verify.sh all` hijau → rilis 0.1.0 → tarik lagi sebagai konsumen.
+
+Percobaan publish ulang 0.1.0 mengembalikan **409 Conflict**. Itu perilaku yang benar dan layak
+dicatat sebagai properti yang kita andalkan: registry menolak menimpa versi rilis. Sejalan dengan
+alasan `verifyPublication` ada — rilis tidak bisa dibatalkan, jadi kesalahan harus tertangkap
+sebelum unggahan, bukan sesudah.
+
+**Catatan untuk tim adopter:** registry Maven GitHub menuntut autentikasi untuk **membaca**, tidak
+seperti Maven Central. Setiap developer dan setiap job CI butuh PAT `read:packages`. Ini friksi
+nyata dibanding Nexus/Artifactory internal; GitHub Packages dipilih sebagai langkah pertama untuk
+membuktikan rantai rilis bekerja, bukan sebagai rumah permanen. Pindah nanti hanya mengubah nilai
+`apmMavenUrl`.
+
+---
+
+**Insiden kredensial, dan aturan yang lahir darinya.**
+
+Token publish sempat berada di `gradle.properties` **milik proyek** — file yang ikut ter-commit, di
+repo yang **publik**. Diperiksa: commit `be1f378` yang sudah ter-push **tidak** memuatnya, jadi tidak
+ada kebocoran. Nilainya tetap direkomendasikan dirotasi karena sempat tercetak polos di output
+terminal.
+
+Dua kesalahan, dan keduanya milik proses ini, bukan milik user:
+
+1. **Saya mencetak nilainya.** Saat memeriksa lokasi token saya memakai `grep` yang menampilkan
+   baris utuh, padahal pemeriksaan pertama sudah benar — hanya melaporkan keberadaan dan panjang.
+   Aturannya: **kredensial diperiksa keberadaannya, tidak pernah isinya.**
+2. **Saya memindahkannya tanpa memastikan itu bertahan.** Token dipindah ke `~/.gradle/`, lalu user
+   memasangnya lagi di tempat lain — tiga kali, di tiga lokasi berbeda. Itu bukan kecerobohan user;
+   itu tanda bahwa lokasi yang saya minta tidak jelas atau tidak nyaman.
+
+Karena itu build sekarang membaca setelan publish dengan urutan: `-P` → **`local.properties`** →
+environment variable. `local.properties` didukung karena itu konvensi Android, sudah ter-ignore git
+di repo ini (diverifikasi), dan itulah tempat yang secara alami dipilih orang. Menolak lokasi yang
+akan dipakai orang tidak membuat rahasia lebih aman — ia hanya memindahkan rahasia ke tempat yang
+tidak diperiksa siapa pun.
+
+Untuk token rilis, urutan preferensi tetap: **macOS Keychain** (init script tersedia di
+`~/.gradle/init.d/apm-credentials.gradle.kts`) → **CI secrets** → `~/.gradle/gradle.properties` →
+`local.properties`. Yang tidak pernah boleh: `gradle.properties` proyek, inline di perintah, atau
+`export` di shell profile.
+
+### 2026-09-09 · A19: gate symbol di CI tidak pernah berjalan — `env` step tidak terlihat oleh `if` step
+
+Bug di wiring CI-nya sendiri, bukan di task-nya. Step symbol upload ditulis begini:
+
+```yaml
+- name: Symbol upload (release gate)
+  if: github.event_name == 'push' && env.APM_SYMBOLS_URL != ''
+  env:
+    APM_SYMBOLS_URL: ${{ secrets.APM_SYMBOLS_URL }}
+```
+
+GitHub Actions mengevaluasi `if:` **sebelum** blok `env:` milik step itu diterapkan, jadi
+`env.APM_SYMBOLS_URL` selalu kosong dan kondisinya selalu `false`. **Step-nya tidak akan pernah
+berjalan**, bahkan setelah secret dipasang.
+
+Untuk sebuah release gate itu bug terburuk yang mungkin: terlihat terkonfigurasi, menegakkan nol.
+Persis kegagalan yang `01` §8 peringatkan — "tanpa symbol, crash report tidak terbaca, dan baru
+ketahuan berminggu-minggu kemudian" — hanya saja penyebabnya di pipeline, bukan di upload.
+
+Diperbaiki dengan memindahkan `env` ke **level job**, yang memang terlihat oleh `if:` step.
+Ditambahkan juga step peringatan eksplisit yang menyala saat secret belum ada: gate yang diam-diam
+dilewati tidak bisa dibedakan dari gate yang bekerja, dan tim yang melihat CI hijau akan
+menyimpulkan symbol sudah terunggah.
+
+**Pelajaran yang lebih umum, dan ini yang ketiga kalinya di proyek ini:** mekanisme kondisional yang
+belum pernah terlihat *berjalan* tidak boleh dianggap bekerja. Sama seperti detektor StrictMode yang
+tidak mendeteksi apa pun (A12) dan `verifyPublication` yang belum pernah gagal (A13) — keduanya
+diberi kontrol negatif. Kondisi CI ini tidak bisa diberi kontrol negatif tanpa menjalankan CI-nya,
+jadi gantinya: cabang "tidak terkonfigurasi" sekarang mengeluarkan output yang terlihat.
+
+### 2026-09-11 · Remote control tidak pernah sampai ke device — dua cacat P0
+
+Sesi pengujian di emulator dengan server ingest HTTPS lokal dan sertifikat terkontrol. Blokir rilis
+terakhir (manual checklist no. 15) tertutup, dan dalam prosesnya dua cacat P0 muncul. Keduanya
+lolos dari 337 unit test hijau, dan keduanya membuat fitur yang sudah ditandai ✅ tidak berfungsi.
+
+**1. `RemoteConfigProvider.refresh()` tidak pernah dipanggil di kode produksi.**
+
+Composition root hanya memasang `loadFromCache()`. Tidak ada satu pun pemanggil `refresh()`, jadi
+SDK **tidak pernah menghubungi `/v1/config` sama sekali**. MOB-20 ("mengambil remote config saat
+startup") tidak terpenuhi, dan MOB-21 mustahil: kill switch tidak bisa tiba kalau config tidak
+pernah diambil. A10 ditandai ✅ dengan unit test yang menguji `refresh()` **secara terisolasi** —
+test yang tidak pernah menanyakan apakah ada yang memanggilnya.
+
+Sekarang di-refresh saat startup (thread latar, setelah graph terbit) **dan** sebelum tiap siklus
+sync. Yang kedua penting: tanpa itu, app yang menyala berjam-jam tidak akan pernah melihat kill
+switch — ia jadi setelan saat peluncuran, bukan kendali jarak jauh.
+
+**2. Kill switch pinning tidak bisa dijangkau, secara konstruksi.**
+
+`RemoteConfigFetcher` memakai `Call.Factory` yang sama dengan uploader. Saat pin berhenti cocok,
+fetch config ikut ditolak — jadi `disabled_features: ["pinning"]` yang akan memulihkannya tidak
+pernah tiba. Pemulihan menuntut rilis app baru: **persis blackout berminggu-minggu yang `02` §6.3
+gambarkan, dan yang menjadi alasan proyek ini ada.**
+
+Fetch config yang gagal sekarang dicoba ulang sekali lewat client **tanpa pin**. Client itu tetap
+menegakkan TLS floor dan tetap tidak bisa cleartext (SEC-12); yang dilepas hanya pin-nya.
+Paparannya sempit dan disengaja: penyerang dengan sertifikat dari CA yang sudah dipercaya device
+bisa menyajikan config yang mematikan pinning — tapi penyerang yang sama toh bisa menyadap endpoint
+ingest yang tidak ter-pin. Menukar itu dengan kill switch yang benar-benar bekerja adalah sisi
+tawar yang lebih baik.
+
+---
+
+**Pola yang berulang, dan sekarang jadi aturan.** Ini kali keempat cacat hanya terlihat di device
+(enkripsi Keystore, sensitivitas ANR, `consumer-rules.pro` kosong, dan sekarang remote control).
+Benang merahnya bukan "Robolectric lemah" — melainkan **unit test menguji komponen, bukan apakah
+komponen itu tersambung**. `refresh()` punya enam test dan nol pemanggil.
+
+Aturannya: **sebuah feature belum ✅ kalau jalur yang dipakai pengguna belum pernah dijalankan
+ujung-ke-ujung.** Untuk SDK ini artinya checklist device di `FEATURES.md`, bukan hanya
+`verify.sh all`. Caranya ada di `TESTING-ON-DEVICE.md`, termasuk harness server ingest lokal di
+`tools/device-testing/` supaya bisa diulang siapa pun.
+
+**Catatan teknis dari sesi ini yang layak diingat:**
+
+- **Emulator tanpa jaringan tervalidasi membatalkan semua WorkManager job** (`Constraints not met`).
+  Dua percobaan sebelumnya menyimpulkan "SyncWorker tidak jalan" padahal itu lingkungannya. Periksa
+  `dumpsys connectivity | grep IS_VALIDATED` sebelum menyalahkan SDK.
+- **Upload memakai chunked transfer encoding.** `IngestUploader.gzip()` tidak meng-override
+  `contentLength()`, jadi OkHttp mengirim tanpa `Content-Length`. Valid HTTP/1.1, tapi sebagian
+  gateway dan WAF menolaknya, dan backend tidak bisa tahu ukuran di muka — relevan untuk `413` di
+  `01` §7. Dicatat sebagai A26, tidak diubah dalam sesi ini.
+- **Checklist 5 (pinning menolak pin salah) ternyata bisa diuji tanpa `okhttp-tls`** — cukup server
+  HTTPS lokal dengan sertifikat yang kita pegang. Anggapan sebelumnya bahwa itu butuh dependency
+  baru salah.
+
+### 2026-10-02 · A28: a session belongs to the event, not to the envelope
+
+`apm-backend` (`worker.go:352`) writes the **envelope's** `session_id` onto every event it contains, and
+an envelope used to be stamped with the session current at *upload* time. Anything captured in one
+session and uploaded in a later one — an offline backlog, a native crash or termination reported at the
+next launch — was filed under the wrong session. Found by cross-checking the backend, not by any test.
+
+**1. The session is fixed at capture and kept off the wire.** `Event.sessionId` is `@Transient`: it
+travels in memory through the queue layers and is persisted by `JsonEventCodec` as
+`{"event": {...}, "session_id": "..."}`, but is never serialized as part of the wire event — `01` §3
+defines no per-event `session_id`, and adding one would be a contract change. Files written before this
+are a bare event and are still read (their session is simply unknown); both shapes start with `{`, so the
+encrypted-versus-plain detection is untouched. `SessionStampingEventQueue` sits outermost and stamps on
+the caller's thread, before the async hop that could outlive a session; an event that already has a
+session is never restamped.
+
+**2. One envelope per session run.** `SyncEngine` uploads only the leading run of events that share the
+first event's session and leaves the rest on disk for the next call (`Sent` already asks the caller to
+continue immediately). The common single-session batch is still one request. A backlog spanning N
+session changes costs N requests, which the per-install limiter (burst 25, 1 per 30 s) absorbs.
+Contiguous runs, not grouping by session: events are in capture order, and reordering them would defeat
+FIFO and `seq`.
+
+**3. A crash or termination from the previous process is filed under the session that process was in.**
+The current session id is written to `SharedPreferences` every time a session starts (`apply()`, off the
+main thread's critical path), and `ApmBootstrap` reads it **before** creating its own. It is applied to
+the termination event and to the **newest** native-crash exit record only — an older unreported crash
+belongs to a session nobody remembers, and stays unrecorded (so it falls back to the current session)
+rather than being given a wrong one. Consequence accepted: `apply()` is asynchronous, so a kill in the
+instant after a session change can leave the session before it. That is still closer than the new
+session, which is what was recorded before.
+
+**Not fixed, and said so:** the same defect exists for every other envelope-level field — `app.version`
+and `app.build`, `user_id` / `user_id_source`, and device/OS version. A native crash reported after an
+app update is filed under the **new** version; a backlog captured while user X was signed in is uploaded
+under whoever is signed in at send time. Recorded as A39, because the user-identity half is a privacy
+question and needs a decision first.
+
+`seq` for these events is still the reporter's counter (`01` §3's `type: crash` qualification) — the
+crashed process's counter does not survive, so that part cannot be recovered and is documented, not fixed.
+
+### 2026-10-02 · A29: the queue lives in `noBackupFilesDir`, because no host can be relied on to exclude it
+
+SEC-07 requires the Android queue to be excluded from auto-backup. The first design kept it in `filesDir`
+and shipped `apm_backup_rules.xml` for the host to merge. That never worked: the file excluded
+`apm_queue/` while the directory was `apm-queue/` (no match), the SDK manifest did not reference it,
+`INTEGRATION.md` never told adopters to merge it, and `DATA-INVENTORY.md` claimed the exclusion anyway. A
+host with the default `allowBackup="true"` and no rules — the verification app — had its whole queue
+eligible for cloud backup. Found by cross-reading the data inventory against the code.
+
+**1. The queue and the cached remote config are stored under `noBackupFilesDir`** (`SdkStorage`). Android's
+documentation: files there are "always excluded even if you try to include them" — a guarantee that holds
+for every host without any action from it. The alternative (fix the path, document the merge) was rejected
+because it depends on every adopter, which is exactly what failed.
+
+**2. The SDK still does not set `allowBackup`, `fullBackupContent` or `dataExtractionRules`.** Same
+reasoning as the cleartext decision (2026-09-07, A11): the manifest merger would push the setting onto the
+host's whole app and override a policy that is theirs. Moving the files makes it unnecessary.
+
+**3. A previous build's files are migrated, not abandoned.** `SdkStorage.migrateLegacy` runs in
+`ApmBootstrap` before the cache and queue are opened. Stranding a queue would be silent loss of real,
+unsent telemetry on every app update. Rename where the filesystem allows (it keeps the modification time
+the queue orders itself by), copy-then-delete otherwise; never overwrite, never throw.
+
+**4. A claim about the platform must be checked against the platform's own documentation before it goes
+into a legal-facing document.** My first draft said the directory is also excluded from device-to-device
+transfer; the official page only says Auto Backup. `DATA-INVENTORY.md` is what a team copies into a
+regulator's form, so it now says exactly what the source says.
+
+**Not decided here, recorded as A40:** the SDK's SharedPreferences file is still backup-eligible, so
+`install_id` can survive a reinstall (contradicting `01` §2) and be cloned onto a second device.
+
+### 2026-10-02 · A36: `sdk.name` stays `apm-android-sdk`; the backend adapts
+
+Cross-checking `apm-ingest` found `LATEST_SDK_VERSIONS` keyed by `apmkit-ios` / `apmkit-android`, so the
+backend's outdated-SDK lookup misses an SDK that sends `apm-android-sdk`. The owner decided: **Android
+keeps `apm-android-sdk`.** This confirms the 2026-09-07 decision (which was made for a different reason —
+resolving a conflict inside this repo) and answers the new question: the SDK does not change, the backend
+table does. Reopening the name would also have meant a wire change for an SDK already published as 0.1.0.
+
+The value is now a single constant, `SdkIdentity.NAME`, read by both `sdk.name` and the `X-APM-Sdk`
+header, and pinned by a test. The needed backend edit is recorded in `FEATURES.md` A36; those repos are
+read-only from here, so the SDK side is finished and the row stays 🟠 until the table is updated.
+
+### 2026-10-02 · A40: the SDK's own state is kept out of backup too, because `install_id` is promised to reset
+
+A29 moved the queue out of backup but left the SDK's SharedPreferences (`install_id`, generated user id,
+latest session id, two crash-dedup markers) in `shared_prefs/`, which Auto Backup includes by default and
+which cannot be relocated. `01` §2 says `install_id` resets with the install; with `allowBackup="true"` it was
+instead restored after a reinstall and copied onto a second device, so one `install_id` could be live on two
+devices — sharing the backend's per-install rate-limit bucket (burst 25) and overwriting each other's
+cumulative `sdk.health` row. The three options were: document it, move the state, or ask every host to merge
+backup rules. The last is the one that already failed in A29, so the state moved.
+
+**1. The state lives in `noBackupFilesDir/apm-state.json`** behind `NoBackupPrefs`, a `SharedPreferences`
+implementation over an atomic JSON file. Implementing the platform interface kept every consumer unchanged.
+No host-supplied value is stored — `setUser` is memory-only — so the file holds nothing personal.
+
+**2. Older values migrate only on a genuine update.** On a fresh install, whatever is in `shared_prefs/` came
+from a backup restore, and importing it would recreate the clone. A genuine update is `lastUpdateTime` more
+than 60 s after `firstInstallTime`; when that is unknown, nothing is imported. The failure modes of the
+heuristic are both on the safe side (a restored id carried over = status quo; an update resetting the id once
+= a new `sdk.health` row), and neither loses telemetry. The old file is always emptied so the cloud copy stops
+holding an `install_id`.
+
+**3. Rejected: fixing it with a rules file for the host.** A29 showed a host-merged file does not get merged.
+
+**Unverified, recorded as a checklist item:** that an install created by a backup restore has
+`firstInstallTime` ≈ `lastUpdateTime`. The behaviour is documented nowhere I found; the design degrades safely
+if it is wrong.
+
+### 2026-10-02 · A39: app version and OS are fixed at capture like the session; `user_id` is not, pending a privacy decision
+
+The A28 defect was general: the backend applies one envelope's `app`, `device` and `session_id` to every event in
+it, and an envelope is built at upload time. After A28 fixed `session_id`, the same applied to `app.version`/
+`app.build` and `device.os_version`: a native crash reported after an app update was filed under the *new*
+version, so "is this crash fixed in the new build" read wrongly, and the backend groups issues by version.
+
+**1. Same mechanism as A28.** `Event.appVersion/appBuild/osVersion` are `@Transient` (never on the wire),
+persisted by the codec, stamped at capture by `SessionStampingEventQueue` (each fact filled on its own, never
+overwriting one an event already carries), and `SyncEngine` sends one envelope per run of equal
+`Event.originKey` (session, version, build, OS). Recovered crashes and terminations use the values persisted by
+the previous start. A normal single-run batch is still one request.
+
+**2. `user_id` / `user_id_source` is deliberately excluded.** Recording it per event means persisting the raw
+host-supplied value — a phone number or email — on disk for the first time. Today it is memory-only, and the
+queue is plaintext whenever the Keystore is unavailable. That would cut against *Capture → Scrub → Disk*,
+SEC-06, and what `DATA-INVENTORY.md` tells adopters for their Data Safety form. It is an owner decision, not an
+implementation detail; the options and a recommendation are in `FEATURES.md` A39. Until it is made, `user_id`
+remains the identity at upload time, and that limit is stated in `DATA-INVENTORY.md`.
+
+**3. Not stamped, and why:** `device.model`, `locale`, `timezone` rarely change and do not drive grouping;
+`integrity` is a per-session snapshot whose volatile members (`debugger_attached`, `is_dev_mode`) are low value
+across processes. Revisit only if a consumer starts relying on them.
+
+### 2026-10-02 · A39/A41 (decision): `user_id` is attributed by identity epoch, and the current host id is stored once
+
+This **supersedes point 2 of the earlier 2026-10-02 A39 entry**, which left `user_id` out pending a decision. Having
+read the iOS SDK (it persists the raw host id in `UserDefaults`, and builds every envelope field at upload), the
+owner approved the recommendation.
+
+**1. Events record an *identity epoch*, never the `user_id`.** A counter that rises each time the identity
+*changes* (`setUser` with a different value, or `clearUser()`). `Event.identityEpoch` is `@Transient` and
+persisted by the codec like the session; at upload `SyncEngine` turns it back into an identity through
+`UserIdProvider.identityFor`. **The rule: an event goes out under the user signed in when it was captured, or as
+anonymous — never under a user who was not.** An era the process cannot identify (an older one after a restart)
+is sent as the generated id with `user_id_source: generated`.
+
+**2. The current host id is stored once, in the no-backup state** — encrypted with the queue's Keystore cipher
+(`e1:`), or as a marked plaintext (`p1:`) when there is none, the same trade-off as the queue (2026-09-07, A14).
+This is the first time a host-supplied value is written to disk, and it is a deliberate, bounded exception to
+"the raw `user_id` lives only in the envelope slot" (SEC-06): one value, never per event, never in a breadcrumb,
+log or other field, never in a backup, and `DATA-INVENTORY.md` / `INTEGRATION.md` now say so. It also fixes
+A41 (`setUser` is no longer lost on restart) and is the baseline the next `setUser` is compared against, so a
+restart is not an identity change.
+
+**3. `APM.clearUser()` is a public API addition.** There was no way to say "signed out", and without it activity
+after logout would keep being attributed to the last user — the error this removes. Hosts are asked to call it.
+
+**4. Rejected: recording the raw `user_id` on every event** (wide PII footprint on disk), and **leaving it
+as is** (a wrong-person attribution error, which is worse than an anonymous one).
+
+**5. Where a test cannot prove a link, the compiler must.** The native reporter runs on a background thread after
+the graph is published, so a host `setUser` can race it; no deterministic test distinguishes a forgotten
+`crashedIdentityEpoch` from a correct one. It is therefore a required parameter, with no default. (The
+termination's copy was removed instead: at that point current equals previous by construction.)
+
+### 2026-10-02 · A38: Android records no headers and no query string; iOS's `req_headers` is a spec gap, not a requirement
+
+Comparing with APMKit found `req_headers`/`res_headers` on iOS network events and the query's parameter names
+inside `path`. They are deliberate (an owner-directed amendment, 2026-08-24, so SEC-02/03 would have live data to
+enforce) but `01` defines no such fields, and **nothing reads them** — not `apm-backend`, `apm-ingest`,
+`apm-backoffice` or apm-docs.
+
+**Decision (recommended, awaiting the owner's confirmation): Android does not capture request/response headers or
+the query string at all.** SEC-02 and SEC-03 forbid *recording* `Authorization`, `Cookie`, custom headers and
+query values; recording nothing meets them in the strongest way and keeps the egress surface minimal. The
+allowlisted headers and the query names would leave the device for no consumer, and `Content-Length` duplicates
+`req_bytes`/`res_bytes`. This is enforced by a test that drives real requests carrying secrets and asserts none
+reaches the serialised event.
+
+**Revisit only if the spec formalizes the fields** (`01` §4.1/§4.2: names, which events, the allowlist, whether
+query names belong in `path`). Until then the two platforms differ in what they send, and
+`DATA-INVENTORY.md` says so instead of claiming the wire output is identical.
+
+### 2026-10-05 · Code-review fixes: what changed in earlier decisions
+
+A review of the uncommitted work found ten defects. Most were bugs; four amend a decision recorded above.
+
+**1. Identity epochs are random, and an unknown epoch is anonymous (amends 2026-10-02 A39/A41).** The earlier rule
+"an epoch newer than the current one is the current identity" violated the rule it was written to protect: a
+switch whose asynchronous state write never landed (process killed) left events stamped with an epoch the next run
+did not know, and they were uploaded as the previous user. And a counter can repeat after a lost write, handing a
+later user an earlier backlog. Epochs are now random, `identityFor` returns the generated id for any epoch it
+does not know, and nothing is ever attributed to the "current" user by default.
+
+**2. Stored identity fails closed (amends the same entry).** "Encrypted with the queue's cipher, plaintext
+(`p1:`) when there is none" had a hole: a cipher that existed but failed once stored the raw value readable, a
+weaker rule than the queue's (an event that cannot be encrypted is not written). Plaintext is now used only when there
+is no cipher at all; a cipher failure stores nothing. Encryption and the write also run on a background thread,
+never on the caller's (the Keystore is a blocking binder call; `setUser` is called from the main thread).
+
+**3. The unpinned config fallback is narrowed (amends 2026-09-11, A24 point 2).** It retried on any failure and
+its stated reason — "the same attacker could intercept an unpinned ingest endpoint anyway" — is false when pinning is
+on. Now: it runs only after a genuine pin rejection; the config it returns is honoured only for "switch pinning
+off", in memory, never cached (a restart retries the pinned path). **Residual, stated plainly:** an attacker with a
+certificate from a trusted CA can still force a pin rejection and switch pinning off for the remainder of that process.
+Whether to keep the fallback at all is an owner decision; until then the exposure is bounded, not removed.
+
+**4. State migration and writes are idempotent and serialised (amends 2026-10-02 A40).** The migration never
+overwrites an existing key, empties the legacy file synchronously and writes its marker last and durably; state
+writes are serialised across threads and instances; and the "previous process" markers are written only after a start
+has fully succeeded, so a retried start cannot mistake its own markers for the real previous process.
+
+**5. "Supported API" is defined (RELEASING.md).** Exactly what `consumer-rules.pro` keeps. Everything else is
+implementation and is not covered by semver. Making the types `internal` is tracked as A43.
+
+**6. The CI release token is step-scoped.** Moving it to job level (to make an `if:` work) exposed it to every step,
+including third-party actions. The condition now reads a non-secret job-level flag; the token is in the one step
+that uploads symbols.
+
+### 2026-10-06 · Second review pass: a restore is not an update, for the queue as well
+
+**1. Old queue files migrate only on a genuine update (extends 2026-10-02 A29/A40).** `SdkStorage.migrateLegacy`
+moved the old `filesDir/apm-queue` and config cache unconditionally, while the key-value state refused the same
+data on a fresh install. Those old files were backup-eligible, so on a reinstall or restore they are a *backup's*
+copy of some earlier queue; moving them in uploaded them under the new `install_id`. Now one rule covers both:
+when the install times positively say "installed just now" the old files are **deleted** (the cloud-eligible
+copy must not linger); when the platform will not say they are **moved**, because dropping real telemetry
+over a failed lookup is the worse mistake. The package manager is not asked at all once nothing legacy remains.
+*Decision taken (the recommended option) — correct me if you would rather send restored events.*
+
+**2. The identity write is handed off under the lock; the remaining window is documented (extends 2026-10-05 §1).**
+Two concurrent `setUser`/`clearUser` calls could enqueue their writes in the opposite order and leave the older
+identity on disk. The hand-off now happens inside the lock (`execute` only enqueues). What stays: the stored identity
+trails memory by the writer's latency, so a process killed inside that window recovers its crash under the previous
+identity. Closing it needs a blocking Keystore call on the caller's thread; it is recorded in `UserIdProvider`'s
+KDoc instead of being paid for.
+
+**3. The debug test certificate is generated, not committed.** `app/src/debug/res/raw/apm_local_test_ca.pem` was a
+30-day certificate that expired within days and left a trust anchor in the repository. `generateLocalTestCa`
+(`app/build.gradle.kts`, debug variants only) copies `tools/device-testing/server.crt` if present, otherwise makes a
+throwaway certificate and discards its key. `server.key`, `server.crt` and `received.json` are git-ignored.
+

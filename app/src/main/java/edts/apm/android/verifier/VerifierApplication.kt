@@ -36,6 +36,13 @@ class VerifierApplication : Application() {
                 // capture, queueing and fail-closed behaviour, none of which need a live backend.
                 // Uploads fail as transport failures and the data stays on disk — which is itself
                 // checklist item 4. Replace with a real ingest URL to exercise upload.
+                // Points at a host that does not exist, so upload fails and events stay on disk —
+                // which is itself checklist item 4.
+                //
+                // To exercise the real upload path instead, run the local HTTPS ingest server and
+                // change this to "https://10.0.2.2:8443/v1/ingest". The debug build already trusts
+                // that server's certificate (src/debug/res/xml/network_security_config.xml), which
+                // is how checklist items 5, 11, 13 and 15 were verified — see TESTING-ON-DEVICE.md.
                 ingestUrl = "https://ingest.invalid.example.com/v1/ingest",
                 appKey = "verifier-app-key",
                 // MOB-26. Takes effect only in a debuggable build — the release APK below ignores

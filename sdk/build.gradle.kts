@@ -1,4 +1,5 @@
 import java.security.MessageDigest
+import java.util.Properties
 import java.util.zip.ZipFile
 
 plugins {
@@ -6,6 +7,33 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     `maven-publish`
+}
+
+/**
+ * Reads a publish setting from, in order: a `-P` property, `local.properties`, then an environment
+ * variable.
+ *
+ * `local.properties` is included because it is where Android developers expect machine-local
+ * settings to live and it is gitignored by convention — verified for this repo. It is **not** a
+ * substitute for a secret store: it is still a plaintext file inside the project directory, one
+ * `git add -f` away from a public repository, and CI cannot use it. For a release token prefer the
+ * macOS Keychain (see `~/.gradle/init.d/apm-credentials.gradle.kts`) or CI secrets.
+ */
+fun publishSetting(property: String, env: String): String? {
+    val fromProperty = (findProperty(property) as String?)?.takeIf { it.isNotBlank() }
+    if (fromProperty != null) return fromProperty
+
+    val local = rootProject.file("local.properties")
+    val fromLocal = if (local.exists()) {
+        val props = Properties()
+        local.inputStream().use { stream -> props.load(stream) }
+        props.getProperty(property)?.takeIf { it.isNotBlank() }
+    } else {
+        null
+    }
+    if (fromLocal != null) return fromLocal
+
+    return System.getenv(env)?.takeIf { it.isNotBlank() }
 }
 
 // A13 (MOB-23/24, SEC-19). Coordinates come from gradle.properties so the POM, the AAR's
@@ -160,15 +188,14 @@ publishing {
         // The real destination (SEC-19). Configured at release time, never committed — see
         // gradle.properties. Registered only when supplied, so a developer without credentials can
         // still run every other publish task.
-        val internalUrl = (findProperty("apmMavenUrl") as String?)?.takeIf { it.isNotBlank() }
-            ?: System.getenv("APM_MAVEN_URL")
+        val internalUrl = publishSetting("apmMavenUrl", "APM_MAVEN_URL")
         if (!internalUrl.isNullOrBlank()) {
             maven {
                 name = "internal"
                 url = uri(internalUrl)
                 credentials {
-                    username = (findProperty("apmMavenUsername") as String?) ?: System.getenv("APM_MAVEN_USER")
-                    password = (findProperty("apmMavenPassword") as String?) ?: System.getenv("APM_MAVEN_PASSWORD")
+                    username = publishSetting("apmMavenUsername", "APM_MAVEN_USER")
+                    password = publishSetting("apmMavenPassword", "APM_MAVEN_PASSWORD")
                 }
             }
         }

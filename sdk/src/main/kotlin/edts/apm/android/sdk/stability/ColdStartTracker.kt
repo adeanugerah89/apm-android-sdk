@@ -12,8 +12,14 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Cold start to first frame (MOB-19) — emits a `performance` event with `state: cold_start` and
+ * Cold start to first frame (MOB-19) — emits a `lifecycle` event with `state: cold_start` and
  * `duration_ms` (`01` §4.6).
+ *
+ * The type is `lifecycle`, not `performance`, to match iOS (`APMKit` `ColdStartTracker.swift`) and the
+ * backend's own parity corpus (`apm-backend` `internal/oracle/corpus.go`). §4.6 lists both types and
+ * the backend stores `type` opaquely, so nothing reads the difference today — but the contract's
+ * promise is identical output across platforms, and a future reader that picks one would otherwise
+ * silently see only one platform's cold starts.
  *
  * The clock starts at [processStartUptimeMs] (`android.os.Process.getStartUptimeMillis()`, API 24)
  * rather than at `APM.start()`. Measuring from our own initialization would quietly exclude
@@ -59,7 +65,7 @@ class ColdStartTracker(
         queue.enqueue(
             Event(
                 eventId = UUID.randomUUID().toString(),
-                type = EventType.PERFORMANCE,
+                type = EventType.LIFECYCLE,
                 tsClient = Clock.nowIso8601(),
                 seq = seqProvider(),
                 attrs = attrs,

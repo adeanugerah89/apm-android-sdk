@@ -130,6 +130,14 @@ class ManualApiTest {
         assertTrue(snapshotAttr.contains("\"category\":\"network\""))
     }
 
+    @Test fun `logError writes breadcrumbs_dropped as the string 0 (01 4-5-2)`() {
+        api.logError(RuntimeException("x"))
+
+        val dropped = queue.events.single().attrs.getValue("breadcrumbs_dropped").jsonPrimitive
+        assertEquals("0", dropped.content)
+        assertTrue("must be a string, as the contract specifies", dropped.isString)
+    }
+
     @Test fun `logError still attaches an (empty array) snapshot when no breadcrumbs were recorded`() {
         api.logError(RuntimeException("x"))
         assertEquals("[]", queue.events.single().attrs.getValue("breadcrumbs").jsonPrimitive.content)

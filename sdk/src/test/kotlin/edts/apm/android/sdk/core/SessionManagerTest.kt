@@ -70,4 +70,39 @@ class SessionManagerTest {
         val uuidRegex = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
         assertTrue("New session_id must be UUID format: $newId", uuidRegex.matches(newId))
     }
+
+    // ─── A28 · persisting the session so a later launch can recover it ──────────
+
+    @Test fun `every new session id is announced, including the first`() {
+        var now = 0L
+        val seen = mutableListOf<String>()
+        val mgr = SessionManager(clock = { now }, onSessionStarted = { seen += it })
+
+        assertEquals(listOf(mgr.sessionId), seen)
+
+        mgr.onBackground(); now = 31_000L; mgr.onForeground()
+
+        assertEquals(2, seen.size)
+        assertEquals(mgr.sessionId, seen.last())
+    }
+
+    @Test fun `no announcement when the session does not change`() {
+        var now = 0L
+        val seen = mutableListOf<String>()
+        val mgr = SessionManager(clock = { now }, onSessionStarted = { seen += it })
+
+        mgr.onBackground(); now = 10_000L; mgr.onForeground()
+
+        assertEquals(1, seen.size)
+    }
+
+    @Test fun `a callback that throws cannot break session handling`() {
+        var now = 0L
+        val mgr = SessionManager(clock = { now }, onSessionStarted = { throw IllegalStateException("prefs gone") })
+        val first = mgr.sessionId
+
+        mgr.onBackground(); now = 31_000L
+
+        assertNotEquals(first, mgr.onForeground())
+    }
 }

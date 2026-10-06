@@ -3,6 +3,8 @@ package edts.apm.android.sdk.queue
 import edts.apm.android.sdk.core.Event
 import edts.apm.android.sdk.crypto.AesGcmQueueCipher
 import edts.apm.android.sdk.crypto.QueueCipher
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -23,19 +25,58 @@ interface EventCodec {
     fun decode(bytes: ByteArray): Event?
 }
 
-/** Plain JSON — the format every build before A14 wrote, and the fallback when there is no key. */
+/**
+ * On-disk record (A28): the wire [Event] plus the session it was captured in, which the wire event
+ * deliberately does not carry. A different top-level shape from a bare event — the key `event` never
+ * appears at the top of one — so the two are told apart by structure, not guessed at.
+ */
+@Serializable
+private data class StoredEvent(
+    val event: Event,
+    @SerialName("session_id") val sessionId: String? = null,
+    @SerialName("app_version") val appVersion: String? = null,
+    @SerialName("app_build") val appBuild: String? = null,
+    @SerialName("os_version") val osVersion: String? = null,
+    @SerialName("identity_epoch") val identityEpoch: Int? = null
+)
+
+/**
+ * Plain JSON — the format every build before A14 wrote, and the fallback when there is no key.
+ *
+ * Since A28 a file is `{"event": {...}, "session_id": "..."}`. Files written before that are a bare
+ * event and are still read (their session is simply not known), because refusing them would discard a
+ * queue's worth of real telemetry on every upgrade — the same reasoning as the plaintext-after-
+ * encryption path below. Both start with `{`, so [AesGcmQueueCipher.looksEncrypted] is unaffected.
+ */
 class JsonEventCodec(
     private val json: Json = Json { encodeDefaults = true }
 ) : EventCodec {
 
+    private companion object {
+        const val STORED_PREFIX = "{\"event\":"
+    }
+
     override fun encode(event: Event): ByteArray? = try {
-        json.encodeToString(event).toByteArray(Charsets.UTF_8)
+        json.encodeToString(StoredEvent(event, event.sessionId, event.appVersion, event.appBuild, event.osVersion, event.identityEpoch))
+            .toByteArray(Charsets.UTF_8)
     } catch (e: Exception) {
         null
     }
 
     override fun decode(bytes: ByteArray): Event? = try {
-        json.decodeFromString<Event>(bytes.toString(Charsets.UTF_8))
+        val text = bytes.toString(Charsets.UTF_8)
+        // One parse, not two. A file this codec wrote starts with the `event` key (it is the first field of
+        // StoredEvent and the encoder is compact); a file from before A28 is a bare event whose first key is
+        // `event_id`. Telling them apart from the first bytes avoids building a JSON tree just to look.
+        if (text.startsWith(STORED_PREFIX)) {
+            val stored = json.decodeFromString<StoredEvent>(text)
+            stored.event.copy(
+                sessionId = stored.sessionId, appVersion = stored.appVersion,
+                appBuild = stored.appBuild, osVersion = stored.osVersion, identityEpoch = stored.identityEpoch
+            )
+        } else {
+            json.decodeFromString<Event>(text)   // written before A28: no session recorded
+        }
     } catch (e: Exception) {
         null
     }

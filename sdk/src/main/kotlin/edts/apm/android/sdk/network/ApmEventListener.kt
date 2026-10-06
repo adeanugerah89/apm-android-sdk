@@ -48,7 +48,7 @@ class ApmEventListener(
         var secureConnectEnd: Long?         = null,
         var requestHeadersSent: Long?       = null,
         var responseHeadersStart: Long?     = null,
-        var isPinningRejection: Boolean     = false
+        var tlsVersion: String?             = null
     )
 
     private val timings = ConcurrentHashMap<Call, Timing>()
@@ -84,6 +84,14 @@ class ApmEventListener(
         timings[call]?.secureConnectEnd = System.nanoTime()
     }
 
+    /**
+     * Fires for every call, including ones that reuse a pooled connection and therefore never run
+     * `secureConnectStart/End` — so this, not `secureConnectEnd`, is where the TLS version is read.
+     */
+    override fun connectionAcquired(call: Call, connection: Connection) {
+        timings[call]?.tlsVersion = connection.handshake()?.tlsVersion?.javaName
+    }
+
     override fun requestHeadersEnd(call: Call, request: Request) {
         timings[call]?.requestHeadersSent = System.nanoTime()
     }
@@ -117,7 +125,10 @@ class ApmEventListener(
 
         // MOB-02b: always emit `network` event
         emitNetworkEvent(host, path, method, status, durationMs, dnsMs, tcpMs, tlsMs, ttfbMs,
-            response.protocol, req.body?.contentLength(), response.body?.contentLength())
+            response.protocol, req.body?.contentLength(), response.body?.contentLength(),
+            tlsVersion = timing.tlsVersion,
+            // A call that never started a TCP connect reused one from the pool.
+            reusedConnection = timing.connectStart == null)
 
         // MOB-02b: additionally emit `network_failure(http_error)` if status >= 400
         if (status >= 400) {
@@ -130,8 +141,7 @@ class ApmEventListener(
         val req    = call.request()
         val now    = System.nanoTime()
 
-        val isPinning = timing.isPinningRejection
-        val category  = FailureCategoryMapper.map(ioe, isPinning)
+        val category   = FailureCategoryMapper.map(ioe)
         val durationMs = msFrom(timing.callStart, now)
 
         emitTransportFailure(
@@ -140,7 +150,7 @@ class ApmEventListener(
             method      = req.method,
             category    = category,
             durationMs  = durationMs,
-            errorMsg    = ioe.message ?: "unknown",
+            error       = ioe,
             tlsPhase    = tlsPhase(timing)
         )
     }
@@ -150,7 +160,8 @@ class ApmEventListener(
     private fun emitNetworkEvent(
         host: String, path: String, method: String, status: Int,
         durationMs: Long, dnsMs: Long?, tcpMs: Long?, tlsMs: Long?, ttfbMs: Long?,
-        protocol: Protocol?, reqBytes: Long?, resBytes: Long?
+        protocol: Protocol?, reqBytes: Long?, resBytes: Long?,
+        tlsVersion: String?, reusedConnection: Boolean
     ) {
         val attrs = buildJsonObject {
             put("host", host)
@@ -165,6 +176,8 @@ class ApmEventListener(
             protocol?.let { put("protocol", it.toString()) }
             reqBytes?.takeIf { it >= 0 }?.let { put("req_bytes", it) }
             resBytes?.takeIf { it >= 0 }?.let { put("res_bytes", it) }
+            tlsVersion?.let { put("tls_version", it) }
+            put("reused_connection", reusedConnection)
         }
         enqueueEvent(EventType.NETWORK, attrs)
     }
@@ -186,7 +199,7 @@ class ApmEventListener(
     private fun emitTransportFailure(
         host: String, path: String, method: String,
         category: FailureCategory, durationMs: Long,
-        errorMsg: String, tlsPhase: String?
+        error: IOException, tlsPhase: String?
     ) {
         val attrs = buildJsonObject {
             put("host", host)
@@ -194,8 +207,13 @@ class ApmEventListener(
             put("method", method)
             put("failure_category", Json.encodeToString(FailureCategory.serializer(), category).trim('"'))
             put("duration_ms", durationMs)
-            put("error_domain", "java.io.IOException")
-            put("error_code", -1)
+            val info = TransportError.of(error)
+            put("error_domain", info.domain)
+            put("error_code", info.code)
+            TransportError.underlyingOf(error)?.let {
+                put("underlying_domain", it.domain)
+                put("underlying_code", it.code)
+            }
             tlsPhase?.let { put("tls_phase_reached", it) }
         }
         enqueueEvent(EventType.NETWORK_FAILURE, attrs)
