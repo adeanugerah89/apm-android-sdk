@@ -77,6 +77,33 @@ internal object ApmBootstrap {
     private const val KEY_APP_BUILD = "apm_app_build"
     private const val KEY_OS_VERSION = "apm_os_version"
 
+    /** What is watching the launch, registered before assembly and bound to the graph during it (A46, A48). */
+    internal class LaunchObservers(val coldStart: ColdStartFirstFrameObserver, val activities: ActivityStateRecorder)
+
+    /**
+     * Starts watching the launch activity. Called at the very top of `APM.start()`, on the caller's thread,
+     * **before** the background assembly begins (A46, A48): registering a lifecycle callback does no I/O, and doing it
+     * late is what lost the first frame and every activity callback before it. Idempotent per Application; never throws.
+     */
+    @Synchronized
+    internal fun observeLaunch(context: Context): LaunchObservers {
+        val application = context.applicationContext as? Application
+        launchObservers?.takeIf { application != null && observedApplication === application }?.let { return it }
+        val observers = LaunchObservers(ColdStartFirstFrameObserver(), ActivityStateRecorder())
+        try {
+            application?.registerActivityLifecycleCallbacks(observers.activities)
+            application?.registerActivityLifecycleCallbacks(observers.coldStart)
+        } catch (e: Throwable) {
+            // Nothing to measure without it; the SDK itself is unaffected.
+        }
+        launchObservers = observers
+        observedApplication = application
+        return observers
+    }
+
+    private var launchObservers: LaunchObservers? = null
+    private var observedApplication: Application? = null
+
     /** Returns true when the SDK is live. False means it is off and will stay off this process. */
     fun start(context: Context, config: ApmConfig): Boolean = try {
         startInternal(context, config)
@@ -107,6 +134,8 @@ internal object ApmBootstrap {
         // left in filesDir BEFORE the config cache and the queue are opened, or an updating app would
         // strand its pending telemetry where nothing reads it.
         SdkStorage.migrateLegacy(app)
+        // A47: an xCrash-era build's tombstones are backup-eligible and unreadable by anything now.
+        SdkStorage.deleteAbandonedNativeCrashDir(app)
         val health = SdkHealth()
         val sdkHeader = "${SdkIdentity.NAME}/${BuildConfig.LIBRARY_VERSION}"
 
@@ -279,15 +308,20 @@ internal object ApmBootstrap {
             queue = queue,
             seqProvider = sequencer::next,
             contextProvider = volatileContext::current,
-            processStartUptimeMs = Process.getStartUptimeMillis(),
+            processStartElapsedMs = Process.getStartElapsedRealtime(),
             isEnabled = { !remoteConfig.config.isDisabled(RemoteConfig.Feature.COLD_START) }
         )
 
         // ─── lifecycle registration (A7 + A10) ──────────────────────────────
         (app as? Application)?.let { application ->
-            application.registerActivityLifecycleCallbacks(volatileContext)
-            application.registerActivityLifecycleCallbacks(ScreenTrackingLifecycleCallbacks(breadcrumbs))
-            application.registerActivityLifecycleCallbacks(ColdStartFirstFrameObserver(coldStart))
+            // A48: not registered with the Application here — by now the launch activity has usually come and gone
+            // past it. The recorder, registered in observeLaunch(), replays what these missed, then forwards live.
+            val launch = observeLaunch(app)
+            launch.activities.attach(volatileContext)
+            launch.activities.attach(ScreenTrackingLifecycleCallbacks(breadcrumbs))
+            // Registered earlier, by observeLaunch(); this only binds the tracker (A46). Calling it here too makes a
+            // direct caller of start() — one that did not come through APM.start() — work the way it always did.
+            launch.coldStart.attach(coldStart)
         }
 
         ConnectivityBreadcrumbSource(app, breadcrumbs).start()

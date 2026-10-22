@@ -16,7 +16,7 @@ import java.io.File
  * Writes are atomic (temp + rename) for the same reason [edts.apm.android.sdk.queue.DiskEventQueue]
  * is — a half-written cache file must never be readable as a valid config.
  */
-class RemoteConfigStore(
+internal class RemoteConfigStore(
     private val file: File,
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 ) {

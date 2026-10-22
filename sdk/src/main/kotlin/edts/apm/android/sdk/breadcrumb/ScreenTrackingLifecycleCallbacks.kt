@@ -11,7 +11,7 @@ import android.os.Bundle
  *
  * A16 registers an instance via `application.registerActivityLifecycleCallbacks(...)`.
  */
-class ScreenTrackingLifecycleCallbacks(
+internal class ScreenTrackingLifecycleCallbacks(
     private val ringBuffer: BreadcrumbRingBuffer
 ) : Application.ActivityLifecycleCallbacks {
 

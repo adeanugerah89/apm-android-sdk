@@ -9,7 +9,7 @@ import android.os.Looper
  * looper is driven by the test thread, so a genuinely blocked main thread cannot be simulated
  * through it.
  */
-interface MainThreadProbe {
+internal interface MainThreadProbe {
     val mainThread: Thread
 
     /** Enqueues [action] on the main thread. Returns false when the queue refused it. */
@@ -20,7 +20,7 @@ interface MainThreadProbe {
 }
 
 /** Real implementation, backed by the main [Looper]. */
-class HandlerMainThreadProbe(
+internal class HandlerMainThreadProbe(
     private val handler: Handler = Handler(Looper.getMainLooper()),
     override val mainThread: Thread = Looper.getMainLooper().thread
 ) : MainThreadProbe {

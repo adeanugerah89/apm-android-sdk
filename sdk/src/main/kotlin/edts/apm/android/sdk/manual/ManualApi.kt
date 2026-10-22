@@ -26,7 +26,7 @@ import java.util.UUID
  * `breadcrumbs` snapshot attached to `error` events rides the same guarantee: it's just another
  * string value in `attrs`, scrubbed the same way as everything else (`01` §4.5.1).
  */
-class ManualApi(
+internal class ManualApi(
     private val queue: EventQueue,
     private val userIdProvider: UserIdProvider,
     private val breadcrumbs: BreadcrumbRingBuffer,

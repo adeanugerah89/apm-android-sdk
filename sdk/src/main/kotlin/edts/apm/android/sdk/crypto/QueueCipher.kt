@@ -8,7 +8,7 @@ package edts.apm.android.sdk.crypto
  * "couldn't do it": a failed encrypt means the event is not written, a failed decrypt means the
  * file is unreadable and gets purged as [edts.apm.android.sdk.core.DropReason.UNDECODABLE].
  */
-interface QueueCipher {
+internal interface QueueCipher {
     fun encrypt(plaintext: ByteArray): ByteArray?
     fun decrypt(ciphertext: ByteArray): ByteArray?
 }

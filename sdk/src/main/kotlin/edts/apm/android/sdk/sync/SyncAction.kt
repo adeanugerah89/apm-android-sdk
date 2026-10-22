@@ -4,7 +4,7 @@ package edts.apm.android.sdk.sync
  * What the SDK must do with the current batch, decided purely from the ingest response —
  * the response contract table in `01` §7. No I/O here, so the mapping is fully unit-testable.
  */
-sealed class SyncAction {
+internal sealed class SyncAction {
     /** 202 — batch accepted, safe to delete from disk (MOB-09). */
     object DeleteBatch : SyncAction()
 

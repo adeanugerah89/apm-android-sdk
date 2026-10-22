@@ -13,7 +13,7 @@ import edts.apm.android.sdk.queue.QueuedEvent
  * Everything an envelope needs besides the batch of events and the health snapshot — both of
  * which are fresher-than-static and passed separately at build time. (`01` §2)
  */
-data class EnvelopeStaticContext(
+internal data class EnvelopeStaticContext(
     val sdkName: String,
     val sdkVersion: String,
     val app: AppInfo,
@@ -26,7 +26,7 @@ data class EnvelopeStaticContext(
 )
 
 /** Builds one outgoing envelope from a peeked batch — pure, no I/O. */
-fun buildEnvelope(ctx: EnvelopeStaticContext, health: SdkHealthSnapshot, batch: List<QueuedEvent>): Envelope =
+internal fun buildEnvelope(ctx: EnvelopeStaticContext, health: SdkHealthSnapshot, batch: List<QueuedEvent>): Envelope =
     Envelope(
         sdk = SdkInfo(name = ctx.sdkName, version = ctx.sdkVersion, health = health),
         app = ctx.app,

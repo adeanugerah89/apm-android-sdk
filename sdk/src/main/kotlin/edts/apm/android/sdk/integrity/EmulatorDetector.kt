@@ -12,7 +12,7 @@ import java.io.File
  * dashboards can filter emulator sessions out of root-rate metrics instead of the SDK trying
  * to suppress the (accurate) root signal on emulators.
  */
-object EmulatorDetector {
+internal object EmulatorDetector {
 
     fun isEmulator(): Boolean = try {
         Build.FINGERPRINT.startsWith("generic") ||

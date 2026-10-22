@@ -16,7 +16,7 @@ import java.util.UUID
 /** The two fields of `ApplicationExitInfo` this detector actually needs — a seam so tests can
  * supply fake exit data directly instead of constructing a real `ApplicationExitInfo` (which
  * has no public constructor and, as of Robolectric 4.13, a broken shadow for doing so). */
-data class ExitInfo(val pid: Int, val reason: Int)
+internal data class ExitInfo(val pid: Int, val reason: Int)
 
 /**
  * MOB-15b / `01` §4.7 — checked once per launch (A16 calls [check] during `APM.start()`).
@@ -28,7 +28,7 @@ data class ExitInfo(val pid: Int, val reason: Int)
  * re-emitted on every subsequent launch. Each process life gets a distinct pid, making it a
  * reliable per-exit key.
  */
-class TerminationDetector(
+internal class TerminationDetector(
     private val context: Context,
     private val prefs: SharedPreferences,
     private val fetchLatestExit: () -> ExitInfo? = { defaultFetchLatestExit(context) }
@@ -69,7 +69,7 @@ class TerminationDetector(
 }
 
 /** Pure — build the `termination` event once a mapped [reason] is known. */
-fun buildTerminationEvent(reason: String, seq: Long, ctx: EventContext): Event = Event(
+internal fun buildTerminationEvent(reason: String, seq: Long, ctx: EventContext): Event = Event(
     eventId = UUID.randomUUID().toString(),
     type = EventType.TERMINATION,
     tsClient = Clock.nowIso8601(),

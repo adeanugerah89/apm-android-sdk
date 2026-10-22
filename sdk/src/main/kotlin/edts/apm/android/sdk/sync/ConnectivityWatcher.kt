@@ -9,7 +9,7 @@ import android.net.Network
  * callback is idempotent so a defensive double-call from the composition root (A16) never
  * throws — CONSTITUTION rule #1: the SDK must never crash the host app.
  */
-class ConnectivityWatcher(private val context: Context) {
+internal class ConnectivityWatcher(private val context: Context) {
 
     private val connectivityManager: ConnectivityManager? =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager

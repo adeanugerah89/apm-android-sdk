@@ -30,7 +30,7 @@ import java.util.concurrent.ConcurrentHashMap
  *   The SyncEngine uses a SEPARATE OkHttpClient with no ApmEventListener attached.
  *   Additionally, the ingest host is skipped in newForCall() via ApmEventListenerFactory.
  */
-class ApmEventListener(
+internal class ApmEventListener(
     private val queue: EventQueue,
     private val sessionProvider: () -> String,
     private val seqProvider: () -> Long,
@@ -249,7 +249,7 @@ class ApmEventListener(
  * Factory that skips instrumentation for the ingest host (MOB-10 anti-loop).
  * Usage: OkHttpClient.Builder().eventListenerFactory(ApmEventListenerFactory(...))
  */
-class ApmEventListenerFactory(
+internal class ApmEventListenerFactory(
     private val queue: EventQueue,
     private val sessionProvider: () -> String,
     private val seqProvider: () -> Long,

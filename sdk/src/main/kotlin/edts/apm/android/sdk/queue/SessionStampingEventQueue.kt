@@ -16,7 +16,7 @@ import edts.apm.android.sdk.core.Event
  * possibly after the session has rolled over. An event that already carries a session — one
  * recovered from a previous process — is left exactly as it is.
  */
-class SessionStampingEventQueue(
+internal class SessionStampingEventQueue(
     private val delegate: EventQueue,
     /** App and OS identity right now (A39). Defaults to "unknown", which records nothing. */
     private val currentApp: () -> AppStamp = { AppStamp(null, null, null) },

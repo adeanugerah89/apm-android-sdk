@@ -4,7 +4,7 @@ import edts.apm.android.sdk.core.DropReason
 import edts.apm.android.sdk.core.SdkHealth
 import edts.apm.android.sdk.queue.EventQueue
 
-sealed class SyncOutcome {
+internal sealed class SyncOutcome {
     /** Queue was empty — nothing to send. */
     object Idle : SyncOutcome()
 
@@ -42,7 +42,7 @@ sealed class SyncOutcome {
  * process death, which is acceptable: a fresh process starts optimistic and re-learns backoff
  * from the first response, same as MOB-07 requires no more than.
  */
-class SyncEngine(
+internal class SyncEngine(
     private val queue: EventQueue,
     private val uploader: Uploader,
     private val health: SdkHealth,

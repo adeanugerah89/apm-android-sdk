@@ -15,7 +15,7 @@ import kotlinx.serialization.Serializable
  * new behaviour — [disabledFeatures] is matched against a fixed, compiled-in set of names.
  */
 @Serializable
-data class RemoteConfig(
+internal data class RemoteConfig(
     /** Kill switch (MOB-21). `false` = SDK captures nothing and uploads nothing. */
     val enabled: Boolean = true,
     val sampling: Sampling = Sampling(),

@@ -11,7 +11,7 @@ import edts.apm.android.sdk.manual.ManualApi
  * integrator's code. A test living in edts.apm.android.sdk.* itself would be filtered out as
  * an SDK frame too, which is the real bug this class exists to avoid in test setup.
  */
-object CallerSimulator {
+internal object CallerSimulator {
     // Keep this call and the return on the same line pattern intentionally simple so the
     // asserted line number in the test stays obvious to read next to this source.
     fun callFromHere(): CallSite = CallSiteLocator.locateCaller()

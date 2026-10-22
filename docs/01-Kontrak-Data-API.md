@@ -89,12 +89,33 @@ menjelma jadi lubang data yang tak dijelaskan.
 `drop_reasons` bersifat terbuka (mis. `queue_full`, `rejected`, `undecodable`); konsumen
 harus menangani kunci yang belum dikenal tanpa rusak.
 
+**Semantik `dropped` dan `drop_reasons` (jangan dicampur):**
+
+- `dropped` = event yang **hilang**: SDK menulisnya atau menerimanya, lalu tidak akan pernah sampai ke
+  backend (antrean penuh, payload ditolak, berkas tak terbaca). Hanya `dropped` yang dibagi `written` untuk
+  rasio yang memicu peringatan di `04` §3.8.
+- `drop_reasons` = rincian penyebab, dan **boleh memuat pembuangan yang disengaja** yang **tidak** dihitung ke
+  `dropped` — tidak ada data yang hilang. Contoh: `watchdog_artifact` (APMKit ≥ 0.0.14: report Watchdog yang
+  hanya bayangan dari sebuah crash dan sengaja dibuang, §4.3). Sebaliknya, `unparseable_report` (berkas report
+  crash yang tidak bisa di-parse) memang kehilangan data, jadi dihitung di `dropped` **dan** di `drop_reasons`.
+- Karena itu konsumen **tidak boleh** mengasumsikan `sum(drop_reasons) == dropped`, tidak boleh menampilkan
+  jumlah `drop_reasons` sebagai "event terbuang", dan tidak boleh memakainya untuk peringatan `04` §3.8.
+  Tampilkan rinciannya sebagai rincian, dengan `dropped` sebagai angka kehilangan.
+
 ### 2.1 Identifier: `user_id` (mentah, transit) → `user_ref` (tersimpan)
 
 Model identifier sengaja dipisah dua, supaya app host bebas memakai identifier apa pun **tanpa** menaruh PII di storage APM:
 
 - **`user_id`** — nilai mentah yang dikirim app (atau di-generate SDK). Boleh berupa nomor telepon/email/teks. Ada di envelope, **transit lewat TLS**, tidak pernah dipersistensi mentah.
 - **`user_ref`** — hasil `HMAC-SHA256(server_key, user_id)` yang dihitung backend saat ingestion (BE-21). **Hanya nilai inilah yang disimpan** dan dipakai di seluruh downstream: Issue, sesi, Read API, dashboard. Opaque, tidak bisa dibalik tanpa `server_key` yang hanya ada di server.
+
+**Format `user_ref` (spesifikasi, mengikat):**
+
+- Digest **HMAC-SHA256 penuh** — 32 byte, di-encode sebagai **64 karakter hex huruf kecil** (`[0-9a-f]{64}`).
+- **Tanpa prefix, tanpa truncation.** Tidak ada bagian digest yang dipotong dengan alasan apa pun — lihat alasan di bawah.
+- Dua implementasi acuan yang HARUS konsisten dengan bentuk ini: `apm-backend/internal/userref.Compute` (produksi) dan `apm-backend/internal/contract.UserRefPattern` (`^[0-9a-f]{64}$`, dipakai untuk validasi di Read API dan di frontend dashboard).
+
+Alasan truncation dilarang: sebuah implementasi acuan lama (pilot/`apm-ingest`) pernah memotong digest ke 12 hex karakter dengan prefix `usr_` (bentuk `usr_[0-9a-f]{12}`). Potongan 48-bit itu berkolisi ~0.2% pada populasi 1 juta user; satu kolisi berarti dua user tergabung jadi satu di User Lookup. Produksi **tidak pernah** memakai bentuk ini — ini murni warisan pilot, tidak valid sebagai `user_ref` produksi, dan ditolak secara eksplisit oleh validasi dashboard (`USER_REF_PATTERN`, `apm-backoffice/src/api/contract.ts`) maupun oleh Read API backend. Integrasi apa pun (termasuk SDK Android) yang membaca atau membandingkan `user_ref` HARUS mengasumsikan bentuk 64-hex di atas, dan HARUS memperlakukan bentuk `usr_<12hex>` sebagai tidak valid, bukan sebagai bentuk alternatif yang sah.
 
 Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu menghasilkan `user_ref` yang sama → grouping & korelasi per user tetap jalan penuh, tapi storage tidak pernah memuat identitas langsung yang bisa dibaca. Trade-off jujur: nilai mentah **tetap melewati** endpoint ingestion sebelum di-hash-dan-dibuang — klaim yang benar adalah "tidak disimpan", bukan "tidak pernah dikirim".
 
@@ -116,10 +137,21 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 
 | Field | Keterangan |
 |---|---|
-| `event_id` | UUID v4. **Kunci deduplikasi di backend** — pengiriman bersifat *at-least-once*, event yang sama bisa datang dua kali. |
+| `event_id` | UUID v4. **Kunci deduplikasi di backend** — pengiriman bersifat *at-least-once*, event yang sama bisa datang dua kali. Untuk event `crash` dan `termination`, SDK iOS (APMKit ≥ 0.0.13) mengambilnya dari id laporan crash KSCrash (`report.id`), bukan UUID acak per kirim: bentuknya tetap UUID v4 (huruf besar, 36 karakter), tetapi **deterministik per laporan** — laporan yang sama yang diproses ulang atau terkirim dua kali membawa `event_id` yang sama. Backend tidak boleh mengandaikan `event_id` selalu baru per pengiriman. |
 | `seq` | Counter monotonik per sesi. Dipakai backend untuk mengurutkan event ketika jam device tidak akurat. **Kualifikasi untuk `type: "crash"`** (APMKit 0.0.8+): SDK memulihkan `session_id` sebuah crash dari sesi yang benar-benar mengalaminya (lewat KSCrash user-info, ditulis sebelum proses mati), tapi `seq`-nya tetap berasal dari counter sesi PELAPOR (sesi baru yang membaca laporan crash tertunda saat proses berikutnya start) — objek `SessionManager` milik sesi yang crash sudah lenyap bersama prosesnya, sehingga counter aslinya tidak bisa dipulihkan. Akibatnya, untuk event `type: "crash"`, `seq` **tidak sebanding** dengan `seq` event lain yang berbagi `session_id` yang sama — jangan diasumsikan ikut deret monotonik sesi tersebut. Backend/dashboard yang mengurutkan event dalam satu sesi sebaiknya memakai `ts_client` untuk baris `crash`, bukan `seq`. |
 | `ts_client` | Waktu dari device. **Tidak boleh dipercaya sebagai sumber kebenaran** — backend menyimpan `ts_server` terpisah (BE-05). |
 | `ctx` | Konteks volatil yang bisa berubah dalam satu sesi. |
+
+> **Status pengisian `ctx` (dicek terhadap kode APMKit 0.0.15, 2026-10-21) — contoh JSON di atas menunjukkan bentuk penuh yang dicadangkan, BUKAN yang dikirim hari ini.**
+>
+> | Field | Status | Keterangan |
+> |---|---|---|
+> | `app_state` | **diisi sebagian** | `foreground` \| `background`. Hanya di event `crash`, `termination`, dan (sejak 0.0.15) `MainThreadHang` — dari transition state KSCrash, aturan di §4.3. Tidak ada untuk crash saat launching/startup, dan **tidak pernah** di `network`, `network_failure`, `error`, `lifecycle`, maupun event cold start. |
+> | `connectivity` | **belum diisi SDK (reserved)** | Perubahan koneksi hanya menjadi breadcrumb (`connectivity_lost`/`connectivity_restored`). |
+> | `screen` | **belum diisi SDK (reserved)** | `recordScreen(_:)` hanya menjadi breadcrumb `navigation`. Kalau suatu saat diisi, nilainya tetap melewati Scrubber (SEC-05), seperti sekarang. |
+> | `low_power` | **belum diisi SDK (reserved)** | — |
+>
+> "Reserved" berarti: nama dan bentuknya dicadangkan untuk SDK yang kelak mengisinya; **backend dan UI tidak boleh bergantung pada keberadaannya**, dan event tanpa field itu valid (`ctx: {}` adalah bentuk yang paling sering dikirim). Saat ini backend hanya meneruskan `ctx` apa adanya pada `sample_event` di detail issue; tidak ada query yang memfilter atau mengelompokkan berdasarkan field `ctx`. Pelacakan di sisi SDK: `FEATURES.md` APMKit, item 25.
 
 ---
 
@@ -165,12 +197,22 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 | `crash_type` | `signal` \| `exception` \| `anr` \| `hang` |
 | `name`, `reason` | Nama exception/signal dan alasannya |
 | `is_fatal` | bool |
+| `hang_resolution` | `recovered` \| `unresolved` — **hanya ada saat `crash_type: "hang"`** yang berasal dari KSCrash Watchdog monitor (`report.report.monitor_id == "Watchdog"`). `unresolved` artinya: hang ini tidak pernah terkonfirmasi pulih sebelum prosesnya mati — bukan "tidak diketahui". Lihat paragraf di bawah. **Hang live (sejak SDK 0.0.15):** event `name: "MainThreadHang"` (`is_fatal: false`) yang dikirim `HangDetector` di proses yang sama begitu hang berakhir juga membawa field ini, selalu `recovered` (event hanya dikirim setelah main thread pulih). Hang live yang dikirim SDK ≤ 0.0.14 **tidak** punya field ini (dan tidak punya `hang_*` lain). |
+| `hang_duration_ms` | int — durasi hang, dari `error.hang`'s start/end timestamp KSCrash. Hanya ada bersama `hang_resolution`. Pada hang live: bilangan bulat yang sama dengan yang tertulis di `reason` ("main thread blocked for Nms"). |
+| `hang_start_state`, `hang_end_state` | string — salah satu dari `startup`, `prewarm`, `launching`, `foregrounding`, `active`, `deactivating`, `background`, `terminating`, `exiting` (nilai transition-state mentah KSCrash, lowercase, bukan daftar yang kita definisikan sendiri). `start` = state saat watchdog **mendeteksi** hang (lihat paragraf di bawah — BUKAN jaminan saat main thread sungguh mulai macet); `end` = state pada tick sidecar terakhir sebelum hang pulih atau prosesnya mati. Hanya ada saat `crash_type: "hang"` dari Watchdog monitor **dan** sidecar KSCrash-nya membawa nilai ini — SDK/KSCrash lama (sebelum field ini ditambahkan) berarti field ini **tidak ada sama sekali**, bukan `"unknown"` dan bukan string kosong. **Hang live (sejak SDK 0.0.15):** `start` = state yang di-cache saat observer Watchdog menerima `started` untuk hang itu (notifikasi dikirim dari thread watchdog setelah laporan hang ditulis, jadi semantiknya sama dengan "saat watchdog mendeteksi" di paragraf bawah); `end` = state yang dibaca saat `ended`, **setelah main thread pulih**, jadi — tidak seperti jalur laporan Watchdog — `end` boleh berbeda dari `start` (mis. hang yang berakhir ketika app sudah masuk background). Kalau `started` tidak pernah diterima untuk hang itu, `hang_start_state` **tidak ada** (SDK tidak menebak dari state saat berakhir). Hang live **tidak** membawa `hang_start_perceptible`/`hang_end_perceptible`; konsumen menurunkannya dari state memakai aturan baris di bawah. |
+| `hang_start_perceptible`, `hang_end_perceptible` | bool — `true` kalau state pasangannya (`hang_start_state`/`hang_end_state`) adalah state yang bisa dilihat pengguna (`startup`, `launching`, `foregrounding`, `active`, `deactivating`), `false` untuk `prewarm`/`background`/`terminating`/`exiting`. Dihitung SDK dari `ksapp_transitionStateIsUserPerceptible` milik KSCrash sendiri, bukan tabel yang kita tulis ulang. **Tidak ada** kalau state pasangannya tidak ada — sama aturannya. |
 | `threads` | Array thread — bentuknya di §4.3.1 |
 | `binary_images` | Daftar binary yang dimuat + UUID — **wajib** untuk symbolication; bentuknya di §4.3.2 |
-| `app_state` | State saat crash |
+| `exception_backtrace` | string — array JSON frame, **bentuk yang sama dengan `frames` di §4.3.1** (`index`, `object_name`, `object_addr`, `instruction_addr`, `is_app`, `symbol_name`/`file`/`line` = `null` sampai symbolication). Sumbernya `crash.last_exception_backtrace` KSCrash: backtrace tempat exception DILEMPAR, yang berbeda dari stack thread yang crash (di situ KSCrash menaruh stack handler). **Hanya ada** untuk crash yang punya backtrace itu — `NSException` dan exception C++; **tidak pernah** untuk trap Swift atau sinyal. Maksimum **64 frame**, urutan KSCrash (frame terdalam dulu), `index` = posisi dalam array. Memakai `binary_images` event yang sama untuk symbolication. Sejak SDK 0.0.15. |
+| `crash_info_message` | string — pesan yang runtime Swift tulis ke section `__crash_info` sebelum trap (`fatalError`, `precondition`, force unwrap `nil`, index di luar jangkauan, dll.), dalam bentuk `<fileID>:<baris>: Fatal error: <pesan>` (contoh nyata: `VerificationApp/ContentView.swift:31: Fatal error: apm-test 507`; `Swift/ContiguousArrayBuffer.swift:675: Fatal error: Index out of range`). SDK hanya mengambilnya dari image **`libswiftCore.dylib`** (terbukti membawa pesan itu pada laporan nyata; image lain, mis. `libsystem_sim_platform` di Simulator yang menulis nama device + UDID, **tidak pernah** diteruskan), membuang newline penutup, memotongnya di **512 byte UTF-8** (di whitespace terakhir yang muat, kecuali itu membuang lebih dari separuh jatah — satu kata panjang tanpa spasi dipotong di karakter utuh terakhir yang muat; tidak pernah di tengah karakter), dan meneruskannya lewat Scrubber seperti string lain. **Teks bebas milik developer** — lihat catatan privasi di `02` §6.1. Tidak ada kalau tidak ada trap Swift (mis. exception Obj-C, sinyal murni) atau image itu tidak membawa pesan. Sejak SDK 0.0.15. |
+| `app_state` | State saat crash — sebenarnya dikirim di `ctx.app_state`, bukan di `attrs`. Aturan pemetaan (sama untuk semua crash): transition-state KSCrash `foregrounding`/`active`/`deactivating` → `foreground`; `background` → `background`; `startup`/`prewarm`/`launching`/`terminating`/`exiting` atau tidak diketahui → **field tidak ada** (tidak ditebak). **Hang live (`MainThreadHang`, sejak SDK 0.0.15):** diisi dari state yang di-cache saat hang dimulai (lihat `hang_start_state`), dengan aturan pemetaan yang sama; event dari SDK ≤ 0.0.14 selalu `ctx: {}`. |
 | `time_since_launch_ms` | int |
 
 > **`is_fatal=false` dikecualikan dari crash-free rate — prinsip yang sama dengan §4.7, diperluas.** Alasan `termination` bukan `crash` (§4.7: "Menghitungnya sebagai crash membuat crash-free rate buruk secara palsu") berlaku kata-demi-kata untuk `crash_type` apa pun di bawah `type: "crash"` yang `is_fatal`-nya `false` — misalnya `hang` yang pulih sendiri tanpa mematikan proses. Backend **wajib** mengecualikan baris `is_fatal=false` dari penghitung `crash_sessions`/`crash_users` (metrik crash-free), bukan hanya baris `type='termination'`. Baris `type='crash'` yang tidak punya `is_fatal` sama sekali (event lama, sebelum field ini ada) dihitung **sebagai fatal** — default yang menganggap tak-fatal akan diam-diam membuang crash sungguhan dari metrik, kegagalan yang jauh lebih buruk daripada memasukkan satu hang yang semestinya dikecualikan. Ditemukan 2026-10-01 dari data pilot nyata: KSCrash Watchdog yang tidak dijeda saat app di-background menghasilkan `crash_type: hang, is_fatal: false` persis pada siklus background/foreground, sebelum celah ini ditutup (lihat `FEATURES.md` APMKit, parked item, untuk perbaikan di sisi SDK yang masih tertunda).
+>
+> **`hang_resolution: "unresolved"` TIDAK berarti "tidak diketahui" — artinya hang ini tidak pernah terkonfirmasi pulih sebelum prosesnya mati.** KSCrash menandai laporan semacam ini `is_fatal: true` (lewat `WatchdogStitch.m`, di sisi SDK) karena ia tidak bisa membuktikan sebaliknya — proses itu sudah tidak ada untuk dimintai konfirmasi. Tapi "tidak terbukti pulih" bukan sinonim dari "crash sungguhan": kematian proses yang memicu kondisi ini bisa jadi crash nyata, atau bisa jadi semata app di-background lalu di-kill OS (jetsam/memory pressure) — kondisi yang sama sekali bukan crash yang dialami pengguna. **Apakah baris `hang_resolution: "unresolved"` tetap dihitung dalam `crash_free_sessions`/`crash_free_users`, atau dipisah ke metrik tersendiri, adalah keputusan produk yang BELUM diambil** — lihat `FEATURES.md` APMKit, item 18, untuk pertanyaan itu apa adanya. Item 18 adalah sumbernya; paragraf ini hanya merujuk ke nomor itu, bukan sebaliknya. **`hang_start_state`/`hang_start_perceptible` (di atas) adalah fakta yang keputusan itu kemungkinan besar akan dipakai** — lihat paragraf berikutnya untuk alasannya; `readapi.py` dan `overview.go` **belum membaca field ini** sama sekali hari ini (TAHAP 2 FEATURES.md item 18: SDK mengirim faktanya, server belum memutuskan apa-apa dari situ).
+>
+> **Arti "start": saat watchdog mendeteksi, bukan saat main thread sungguh macet.** KSCrash mencatat `hang_start_state`'s timestamp dari ping terjadwal terakhir (dekat dengan saat macetnya sungguh mulai), tapi transition-state-nya sendiri diambil pada TICK DETEKSI pertama (`watchdogTimerFired`, bisa tertunda hingga ambang 250ms, atau — pada skenario app disuspend lalu di-resume sebelum main thread sempat merespons ping — bisa jauh lebih lambat karena jam dinding terus berjalan selama suspend). Walau begitu, `hang_start_state` tetap field yang andal untuk "apakah pengguna pernah melihat app ini macet": `_transitionState` di KSCrash hanya berubah lewat notifikasi `UIApplication*` yang dikirim SYNCHRONOUS di main thread — kalau main thread benar-benar macet, notifikasi itu TIDAK BISA terkirim, jadi state-nya membeku di nilai terakhir yang sah sebelum macet. Hang yang dimulai `active` (pengguna melihatnya) tetap tercatat `active` walau app lalu dibackground paksa sambil masih macet; hang yang murni terjadi di background (termasuk artefak jam dari skenario suspend/resume di atas, karena notifikasi "masuk background" sudah terkirim sebelum suspend fisik terjadi) tercatat `background`. **Konsekuensinya: untuk satu hang yang sama, `hang_end_state` dalam PRAKTIK sama dengan `hang_start_state`** — karena state hanya bisa berubah lewat notifikasi main-thread, dan main thread yang sedang macet itulah yang seharusnya menjalankan notifikasi tersebut. **Ini TIDAK dijamin secara formal**: tidak ada pembuktian di sini yang menutup semua kasus, dan urutan antara notifikasi `WillEnterForeground` (dikirim main thread saat resume) dengan tick deteksi watchdog sendiri tidak disinkronkan oleh kode ini — ada celah (race), bukan kontradiksi atas mekanisme di atas, tapi juga bukan sesuatu yang dikendalikan SDK ini. `hang_end_state` tetap dikirim apa adanya (SDK tidak menyimpulkan ini, server yang nanti boleh), tapi jangan berharap ia membawa informasi baru di atas `hang_start_state`, dan jangan memperlakukan keduanya sebagai dijamin identik secara konstruksi.
 
 #### 4.3.1 Bentuk `threads`
 
@@ -208,6 +250,17 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 > **`is_app` sengaja diisi SDK, bukan diturunkan konsumen.** SDK tahu persis binary utama aplikasinya saat crash terjadi; Frontend tidak, dan menebaknya dari nama akan rapuh (nama modul bisa mirip, framework milik aplikasi tidak akan terdeteksi).
 >
 > **Konsekuensi penting: penyorotan frame aplikasi TIDAK menunggu symbolication.** Alamat sudah dapat dipetakan ke binary pemiliknya lewat `binary_images` sejak awal, jadi "frame ini milik kode kita" sudah diketahui meski nama fungsinya belum ada. Justru di crash yang belum tersimbolikasi inilah penandanya paling berguna — ia memisahkan "crash di kode kita" dari "crash di framework sistem". FE-06 dapat berjalan penuh sebelum BE-10/11 ada.
+
+**Bentuk `exception_backtrace` (sejak SDK 0.0.15).** Bukan array thread, melainkan satu daftar frame — persis elemen `frames` di atas:
+
+```json
+"exception_backtrace": [
+  { "index": 0, "object_name": "CoreFoundation", "object_addr": "0x180a00000", "instruction_addr": "0x180a3f2c4", "is_app": false, "symbol_name": null, "file": null, "line": null },
+  { "index": 1, "object_name": "MerchantApp", "object_addr": "0x104a10000", "instruction_addr": "0x104a2c810", "is_app": true, "symbol_name": null, "file": null, "line": null }
+]
+```
+
+Dikirim sebagai string JSON (satu atribut string, konvensi yang sama dengan `threads`), hanya bila ada, maksimum 64 frame. `is_app` dihitung SDK dengan aturan yang sama dengan `threads`. Backend memakai `binary_images` event yang sama untuk menyimbolkannya; untuk `crash_type: "exception"` ia adalah sumber frame yang lebih tepat daripada stack thread yang crash.
 
 #### 4.3.2 Bentuk `binary_images`
 
@@ -390,12 +443,49 @@ Backend mengelompokkan event menjadi **Issue**. Website menampilkan Issue, bukan
 
 | Tipe | Aturan fingerprint |
 |---|---|
-| `crash` | Hash dari (tipe exception + N frame teratas non-sistem yang sudah dinormalisasi) |
+| `crash` | **v2** (BE-11 tahap B): hash dari (`app_id` + nama exception/signal + `trap_kind` bila ada + kunci kanonik frame aplikasi teratas); bila frame tidak bisa diberi nama, dari pesan `crash_info_message` yang dinormalisasi (sejak SDK 0.0.15) — lihat bawah. **v1** (tetap berlaku untuk crash yang belum punya signature v2): hash dari (nama exception + `reason` yang dinormalisasi). |
 | `network_failure` | Hash dari (host + `failure_category` + `status_code`) |
 | `error` | Hash dari (domain + code + message yang dinormalisasi + `source_file` + `source_function`). **`source_line` sengaja TIDAK ikut** — lihat catatan di bawah. |
 | `termination` | Hash dari (`termination_reason` + versi app) |
 
 > **Kenapa `source_line` dikecualikan.** Menambah satu baris di atas lokasi pemanggilan akan menggeser nomor barisnya. Jika `source_line` ikut fingerprint, issue lama tampak "hilang" dan muncul issue baru yang identik — padahal bug-nya sama dan tidak ada yang diperbaiki. `source_file` + `source_function` cukup stabil terhadap penyuntingan biasa, sekaligus memisahkan dua error berbeda yang kebetulan punya domain, code, dan pesan serupa. `source_line` tetap dikirim dan ditampilkan untuk melompat ke kode.
+
+### 6.1 Crash: pengelompokan v2 (BE-11 tahap B)
+
+Crash yang symbolication-nya sudah menghasilkan frame aplikasi punya baris `event_fingerprint` versi 2 (signature = hash dari `app_id`, nama exception/signal, `trap_kind`, dan kunci kanonik frame aplikasi teratas; kunci kanonik membuang nomor closure, sehingga `closure #2 in X.f()` dan `closure #3 in X.f()` satu kunci). Crash yang tidak bisa diberi frame yang benar **dan** tidak membawa pesan trap yang bisa dipakai (tanpa thread, hanya frame tanpa nama, image tanpa dSYM) **tetap v1** — tidak ada tebakan.
+
+| | v1 | v2 |
+|---|---|---|
+| `id` | 12 hex (`3821336ebbd7`) | `v2_` + 16 hex (`v2_3fa9c1d200b47e11`); tidak mungkin bertabrakan dengan v1 |
+| `title` | `<nama> · <reason>` | `<label> in <frame teratas>`; label = `trap_kind` bila ada (huruf pertama kapital: `Index out of range in …`), selain itu nama exception/signal apa adanya |
+| `fingerprint_version` | `1` | `2` |
+| `fingerprint_basis` | `name+reason` (+ `fingerprint_note`, `id_stable: false`) | `frame` atau `crash_info` (`id_stable: true`, tanpa catatan) |
+
+**Sumber frame (sejak SDK 0.0.15).** Untuk `crash_type = exception` (`NSException`, C++), frame diambil dari `attrs.exception_backtrace` — stack tempat exception DILEMPAR — bukan dari thread yang crash (di situ KSCrash hanya menaruh stack handler Crashlytics/reporter, sehingga semua `NSGenericException` dulu jatuh ke satu kunci yang sama). Backtrace itu di-decode dan di-symbolicate persis seperti thread (`binary_images` event yang sama); **semua** frame-nya alamat kembali, termasuk frame 0, sehingga pencariannya `alamat − 1`. Aturan jalan (walk) sama dengan thread: frame sistem/reporter dilewati, frame app tanpa nama menghentikan walk, dSYM utama yang belum ada menunda (`NotReady`). Bila backtrace tidak menghasilkan nama, thread yang crash dipakai seperti biasa. Event tanpa field itu (SDK ≤ 0.0.14, trap Swift, sinyal) tidak berubah sama sekali — signature-nya tetap yang lama, dan satu `NSException` baru berbagi grup dengan yang lama bila frame app tempat ia dilempar sama.
+
+**`crash_info_message` sebagai cadangan (basis `crash_info`).** Pesan `<Module>/<File>.swift:<baris>: Fatal error: <pesan>` (§4.3) dipakai **hanya** bila walk frame berhenti karena frame app yang tidak bisa diberi nama (closure/thunk tanpa nama, alasan `unnamed-app-frame`) atau karena tidak ada frame app sama sekali (`no-app-frame`). Alasan berhenti lain (titik masuk, image app tanpa UUID atau tanpa dSYM, dSYM utama yang belum datang) **tidak** memakainya. Signature yang sudah dihasilkan walk frame **tidak pernah berubah** karena pesan ini; pesan tidak pernah menggantikan frame.
+
+- Parser: `<path>:<baris>: ` lalu jenis (`Fatal error`, `Precondition failed`, `Assertion failed`, selain itu `other`) lalu pesan (boleh kosong). File = **basename** (`CartViewController.swift`; modul dan direktori adalah detail build). Baris disimpan sebagai metadata dan **tidak ikut signature** (alasan sama dengan `source_line` di atas). String yang tidak berbentuk itu dianggap "tidak dipahami" → tetap v1.
+- Normalisasi pesan, berurutan: teks dalam kutip (`"…"`, “…”, `` `…` ``, `'…'`) → `"<str>"`; UUID → `<uuid>`; `0x…` → `0x#`; setiap deret angka → `#`; whitespace dilipat jadi satu spasi; dipotong **120 karakter**. Huruf besar/kecil dipertahankan.
+- Signature = `sha256("v2|<app_id>|<nama exception/signal>|ci|<file>|<jenis>|<pesan ternormalisasi>")`. Pesan yang kosong setelah normalisasi → tetap v1 (tidak ada yang bisa dikelompokkan). Trap stdlib di build Release tidak membawa `crash_info_message`; event itu tetap memakai `trap_kind` seperti sebelumnya.
+- `event_fingerprint` menyimpan `basis = 'crash_info'` dan `crash_info = {file, line, kind, message}` (pesan ternormalisasi); baris berbasis frame menyimpan keduanya `NULL`.
+- Read API: `fingerprint_basis: "crash_info"`; `title` = `<jenis>: <pesan> in <File>.swift` (mis. `Fatal error: apm-test in CartViewController.swift`; jenis `other` tidak ditulis; pesan kosong → `Fatal error in <File>.swift`); detail membawa `crash_info: {file, line, kind, message}` dari event contoh (baris = milik event itu). Backoffice menjelaskannya di kartu "Grouping basis".
+- **Privasi.** `crash_info_message` adalah teks bebas dari developer dan bisa memuat email, nomor kartu, atau token. Ia tidak pernah muncul di log backend mana pun (worker, ingest, Read API, rencana `fingerprintbackfill`); yang tersimpan di baris hanya bentuk ternormalisasinya. Dijaga test yang menangkap output log.
+
+Saklar: Read API membaca **satu** setting proses, `APM_READ_GROUPING_V2` (default **mati**), dan setting itu berlaku sama untuk semua endpoint (daftar issue, detail, PATCH status, overview, user detail, integration). Mati = perilaku persis sebelum tahap B; `fingerprint_version` selalu `1`.
+
+Event dengan `crash_type = hang` **tidak pernah** mendapat signature v2 (benang yang dibawanya hanyalah posisi main thread saat watchdog menembak); hang tetap v1.
+
+**Tidak ada regroup diam-diam.** Saat saklar menyala:
+- issue v1 yang kehilangan sebagian event: daftar membawa `regrouped_events` (jumlah event yang pindah), detail membawa `regrouped_into: [{id,title,events}]`;
+- issue v2: detail membawa `merged_from: [{id,events}]`, `top_frame` (kunci kanonik), `trap_kind`;
+- id v1 yang tidak punya event lagi menjawab **`404 {"error":"issue_moved","moved_to":[{id,title,events}]}`** (bukan `not_found`; hanya untuk app yang sama; hitungan mengikuti `days` dan `real_users_only`). `PATCH` ke id itu menjawab sama.
+
+**Status per app.** `issue_status` berkunci `(app_id, issue_id)`; PATCH hanya menulis untuk app di path. Issue v2 yang belum pernah di-PATCH mewarisi status dari issue v1 asal event-nya **hanya bila semuanya sepakat** (`status_source: "carried"`); bila berbeda, statusnya `new` dengan `status_source: "conflict"`. Baris lama tanpa app (`app_id = ''`) dijawab sebagai fallback sampai `cmd/issuestatusscope` menyalinnya ke tiap app.
+
+**Regresi (v1 dan v2 sama).** Issue `resolved` yang menerima event dengan `ts_server` lebih baru dari waktu resolve ditampilkan `status: "new"`, `regressed: true`, `resolved_at`. ("Resolve in version X" belum ada; backlog.)
+
+Semua field baru bersifat aditif dan **hanya muncul bila berlaku** (kecuali `fingerprint_version`), jadi respons v1 tidak berubah satu byte pun untuk konsumen lama. Desain dan ukuran biaya query: [design/BE-11/tahap-B-plan.md](design/BE-11/tahap-B-plan.md).
 
 > **Aturan ini milik Backend, tapi Frontend bergantung padanya.** Mengubah aturan mengubah pengelompokan data historis — perubahan wajib dikomunikasikan dan diberi versi.
 >
@@ -408,6 +498,8 @@ Backend mengelompokkan event menjadi **Issue**. Website menampilkan Issue, bukan
 **Headers:** `X-APM-Key` (kunci per app) · `X-APM-Sdk` (nama & versi) · `Content-Type: application/json` · `Content-Encoding: gzip`
 
 **Body:** Envelope (§2). Maksimum **1 MB terkompresi**, maksimum **200 event** per request.
+
+> **Endpoint ini WAJIB menerima body tanpa `Content-Length` (`Transfer-Encoding: chunked`), bukan hanya body dengan `Content-Length` yang sudah dihitung.** OkHttp (SDK Android) men-stream body gzip tanpa menyatakan ukurannya lebih dulu, jadi setiap request dari device Android nyata datang chunked, tanpa `Content-Length` sama sekali — ini bukan kasus tepi, melainkan bentuk permintaan yang normal untuk platform tertentu. Kontrak ini sebelumnya diam soal ini, dan diamnya itu yang membuat dua implementasi menebak berbeda: `apm-backend` (Go, `net/http`) menangani `Transfer-Encoding: chunked` secara transparan tanpa perubahan apa pun (stdlib-nya men-dechunk sebelum handler melihat body), sedangkan `apm-ingest` sebelumnya hanya membaca `Content-Length` byte — untuk request chunked itu selalu 0, sehingga body yang terbaca kosong dan berakhir `400 malformed json`. Implementasi mana pun yang melayani endpoint ini wajib menangani kedua bentuk transfer tersebut, bukan hanya salah satunya.
 
 ### Kontrak response — wajib disepakati Mobile & Backend
 
@@ -422,7 +514,7 @@ Backend mengelompokkan event menjadi **Issue**. Website menampilkan Issue, bukan
 
 > Kontrak ini sumber bug klasik kalau tidak disepakati di awal: SDK yang me-retry `400` selamanya akan menghabiskan baterai user dan membanjiri server dengan payload yang memang tidak akan pernah diterima.
 
-**Idempotensi:** backend melakukan dedup berdasarkan `event_id` dengan window minimal **7 hari**.
+**Idempotensi:** backend melakukan dedup berdasarkan `event_id` dengan window minimal **7 hari**. Dedup ini yang menyerap duplikat crash/termination: SDK iOS ≥ 0.0.13 memakai id laporan crash sebagai `event_id` (§4.3, §4.7), jadi laporan yang sama selalu ter-dedup, dan backend hanya boleh memvalidasi `event_id` sebagai string tidak kosong (jangan menolak berdasarkan huruf besar/kecil atau versi UUID).
 
 ---
 
@@ -474,6 +566,15 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 
 > **Filter device-integrity berlaku lintas endpoint.** Endpoint `overview`, `issues`, dan `network` menerima parameter filter `is_emulator`, `is_rooted`, `is_dev_mode` — termasuk opsi "kecualikan sesi non-real (emulator/debug)" untuk metrik headline (FE-22).
 
+> **`sdk_versions` per entri — field tambahan (feat-016 follow-up).** Tiap entri array `sdk_versions` pada `GET /v1/apps/{id}/integration` membawa, selain `sdk_name`/`version`/`sessions`/`latest_known`/`is_outdated`:
+>
+> | Field | Arti |
+> |---|---|
+> | `installs` | `COUNT(DISTINCT install_id)` dalam jendela — ukuran adopsi yang lebih jujur daripada `sessions`: satu install yang membuka app berkali-kali menghasilkan banyak sesi tapi tetap satu install. Selalu hadir (bukan `null`), karena setiap entri berasal dari baris `GROUP BY` dengan ≥1 event. |
+> | `last_seen` | ISO 8601, `MAX(ts_server)` untuk pasangan `(sdk_name, version)` itu dalam jendela. Memungkinkan Frontend membedakan versi lama yang **masih aktif** dari versi lama yang cuma sisa data beberapa hari lalu (`04` §3.8) — lihat catatan ambang 24 jam di sana. |
+>
+> `installs` dan `last_seen` dihitung identik di `readapi.py` (pilot) dan `integration.go` (Go) — dibuktikan oleh `TestIntegrationParityAgainstRealPilot`.
+
 > **Breadcrumb pada timeline sesi — apa yang ada dan apa yang tidak.** Breadcrumb hidup di ring buffer memori perangkat dan **hanya ikut terkirim ketika ada `crash` atau `error`** (§4.5.1). Konsekuensinya:
 >
 > | Hasil sesi | `breadcrumbs` | `breadcrumbs_status` | `timeline` |
@@ -493,6 +594,31 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 > `breadcrumbs_available` **tetap ada dan tidak berubah artinya** — penambahan ini bersifat aditif, konsumen lama tidak perlu diubah. Konsumen baru memakai `breadcrumbs_status` untuk membedakan rusak dari kosong.
 >
 > Ini penerapan langsung dari prinsip `04-Frontend-Website.md` §3.8: *jangan tampilkan "semua aman" untuk kondisi yang belum bisa dijawab.* `breadcrumbs_available: false` pada payload rusak adalah persis pelanggaran itu — tampak seperti sesi sehat tanpa breadcrumb, padahal datanya ada dan hilang terbaca.
+
+> **Definisi `requests`, `failures`, `failure_rate`, dan persentil pada endpoint network** (per host, per route breakdown, DAN `network_failure_rate` overview — koreksi feat-010/feat-012, 2026-10-13; rumus `requests` DISEMPURNAKAN 2026-10-13 dengan komponen `GREATEST`, lihat di bawah). §4.2 di atas menetapkan: satu respons ≥ 400 **selalu** menghasilkan DUA baris event untuk SATU request — satu `network` (status asli) **ditambah** satu `network_failure(failure_category=http_error)`. Siapa pun yang mengimplementasikan endpoint ini (termasuk, secara eksplisit, pembaca Android SDK di masa depan) harus tahu persis bagaimana pasangan itu dihitung, supaya tidak menghitung satu request sebagai dua — dan supaya sebuah http_error yang KEHILANGAN pasangannya (lihat di bawah) tidak menghilang dari hitungan:
+>
+> ```
+> requests = COUNT(network)
+>          + COUNT(network_failure WHERE failure_category ≠ http_error)
+>          + GREATEST(0, COUNT(network_failure WHERE failure_category = http_error)
+>                        - COUNT(network WHERE status_code ≥ 400))
+> ```
+>
+> | Metrik | Rumus | Kenapa |
+> |---|---|---|
+> | `requests` | Rumus `GREATEST` di atas, dihitung PER KELOMPOK (per host, per route, per app untuk overview) | Suku pertama+kedua: `network` dihitung apa adanya; `network_failure` non-`http_error` (`timeout`, `dns`, `ssl_*`, dst.) tidak punya pasangan `network` sama sekali, jadi tetap dihitung, sekali. Suku `GREATEST`: `http_error` idealnya TIDAK ditambahkan (request-nya sudah terhitung lewat baris `network` pasangannya, §4.2) — TAPI itu hanya benar selama pasangannya memang ada. `GREATEST(0, he - paired)` mengkreditkan PERSIS SELISIH `http_error` yang tidak terpasangkan dengan `network`-nya sendiri, sehingga tiap `http_error` yatim tetap terhitung sebagai satu request miliknya — bukan hilang dari penyebut, dan bukan pula membuat `failures` lebih besar daripada `requests`. |
+> | `failures` | `COUNT(network_failure)` — tidak berubah | `http_error` TETAP dihitung sebagai kegagalan di sini; yang dikoreksi hanya penghitungannya di `requests`, bukan di `failures`. |
+> | `failure_rate` | `100 × failures / requests`, atau **`null`** bila `requests = 0` | Konvensi Go yang sudah ada untuk pembagi nol (null, bukan 0 — "tidak ada data" bukan "0%"). Dengan rumus `GREATEST` di atas, `requests = 0` HANYA mungkin kalau kelompok itu benar-benar tidak punya event sama sekali (baik `network` maupun `network_failure`) — kelompok seperti itu tidak akan pernah muncul sebagai baris pada endpoint ini (GROUP BY tidak menghasilkan baris untuk kelompok kosong), jadi di level host/route ini secara praktis tidak teramati; `network_failure_rate` tingkat overview TETAP bisa 0 denominator sungguhan (app/window benar-benar kosong) dan sudah lama memakai null di sana. |
+> | `p50` / `p95` / `p99` | Hanya dari durasi baris **`network`** | Baris `network_failure(http_error)` adalah KOPI dari durasi pasangan `network`-nya (request yang sama) — memasukkannya menghitung durasi itu dua kali. Baris kegagalan transport tidak pernah punya respons yang selesai sungguhan, jadi durasinya (kalau ada) tidak pernah mewakili latensi nyata dan tidak boleh ikut memengaruhi persentil — termasuk saat durasinya sangat panjang (mis. timeout), yang kalau diikutkan bisa menggeser `p99` jauh dari kenyataan. Komponen `GREATEST` TIDAK memengaruhi baris ini: persentil tetap hanya dari `network`, titik. |
+>
+> **Kenapa komponen `GREATEST` perlu ada sama sekali.** Versi pertama koreksi ini (per keputusan sebelumnya) langsung MENGECUALIKAN setiap `http_error` dari `requests`, dengan asumsi request-nya selalu sudah terhitung lewat pasangan `network`-nya. Asumsi itu TERBUKTI salah untuk kasus:
+> - **SDK versi lama** yang belum mengimplementasikan pasangan ganda §4.2 (sebelum MOB-02b di Android, atau sebelum commit pertama APMKit untuk iOS) — mengirim `network_failure(http_error)` saja, tanpa `network` pendampingnya.
+> - **Platform lain, atau bug di satu platform** yang menyimpang dari pasangan ganda yang didokumentasikan, tanpa diketahui dulu oleh server.
+> - **Event yang hilang** di jalur transport/ingest (jaringan device putus persis setelah satu dari dua event terkirim) — tidak ada yang menjamin pasangan sampai berdua atau tidak sama sekali.
+>
+> Tanpa `GREATEST`, kasus-kasus itu membuat `requests` dihitung TERLALU RENDAH, dan pada kasus ekstrem membuat `failures > requests` — contoh nyata: 1 respons sukses berpasangan + 2 `http_error` tanpa pasangan dulu terbaca `requests=1, failures=2` → *failure rate* 200%, sebuah angka yang mustahil secara definisi. `GREATEST(0, he - paired)` memperbaiki ini tanpa mengubah perilaku untuk data yang pasangannya lengkap: kalau `he ≤ paired` (kasus normal, SDK yang patuh §4.2), suku itu bernilai 0 dan hasilnya identik dengan rumus pengecualian murni di atas.
+>
+> Sebelum koreksi pertama, `requests` menghitung setiap baris `network` + `network_failure` tanpa pembedaan — sebuah route yang 100% gagal dengan status 404 terbaca sebagai *fail rate* 50%, bukan 100%, karena setiap kegagalan ikut menggandakan pembilang request.
 
 > **Blok `drilldown` pada endpoint network.** Diaktifkan dengan `&host=…` (opsional `&failure_category=…`) dan berisi, selain deret waktu per menit:
 >

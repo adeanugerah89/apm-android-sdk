@@ -6,6 +6,7 @@ import androidx.work.Configuration
 import androidx.work.testing.WorkManagerTestInitHelper
 import edts.apm.android.sdk.breadcrumb.BreadcrumbCategory
 import edts.apm.android.sdk.internal.ApmRuntime
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -233,6 +234,16 @@ class ApmPublicApiTest {
         assertEquals("user-at-the-crash", ApmRuntime.current!!.syncEngine.contextFor(crash).userId)
     }
 
+    @Test fun `start deletes the tombstones an xCrash-era build left in filesDir (A47)`() {
+        val leftover = java.io.File(app.filesDir, "apm-native-crash").apply { mkdirs() }
+        java.io.File(leftover, "tombstone_00001.xcrash").writeText("stack trace and memory map")
+
+        APM.start(app, config()); APM.awaitStarted(10_000)
+
+        assertTrue("the SDK must have started", APM.isStarted)
+        assertFalse("the backup-eligible leftover must be gone after start", leftover.exists())
+    }
+
     @Test fun `an updating app keeps its pending events, and new ones never land in filesDir (A29)`() {
         setInstallTimes(first = 1_700_000_000_000L, lastUpdate = 1_700_000_000_000L + 3 * 86_400_000L)   // a genuine update
         // What the previous build left behind: a queued event in the old, backup-eligible location.
@@ -273,6 +284,108 @@ class ApmPublicApiTest {
         assertFalse("a backup's queue was filed under this install: $ids", "restored-from-another-device" in ids)
         assertEquals("only the event captured here", 1, ids.size)
         assertFalse("and the cloud-eligible copy is gone", java.io.File(app.filesDir, "apm-queue").exists())
+    }
+
+    // ─── A46 · cold start when assembly outlasts the first frame ────────────────
+
+    private fun dispatchDraw(activity: android.app.Activity) {
+        val observer = activity.window.decorView.viewTreeObserver
+        observer.javaClass.getDeclaredMethod("dispatchOnDraw").apply { isAccessible = true }.invoke(observer)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()   // the listener defers its work with decorView.post {}
+    }
+
+    private fun coldStarts() = ApmRuntime.current!!.queue.peek(50).map { it.event }
+        .filter { it.type == edts.apm.android.sdk.core.EventType.LIFECYCLE &&
+            it.attrs["state"]?.toString()?.contains("cold_start") == true }
+
+    /**
+     * `APM.start()` assembles on a background thread when called from the main thread (A18), so on a slow device the
+     * first frame is drawn BEFORE the graph exists. The test holds the assembly (`startNow` synchronises on `APM`)
+     * until the first frame and a later resume have both happened — exactly what a slow emulator did to the
+     * verification app: no cold start at all, or, when the user came back within a minute, a "cold start" measured
+     * to that later resume.
+     */
+    @Test fun `cold start is measured at the first frame even when assembly finishes after it (A46)`() {
+        assertEquals("the test must run on the main thread, or start() would assemble inline", android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
+        // Robolectric reports a process start of 0, which would make the duration the whole of its fake uptime and
+        // trip the plausibility cap. Say the process started "now", the way a real one just forked would.
+        org.robolectric.util.ReflectionHelpers.setStaticField(android.os.Process::class.java, "sStartElapsedRealtime", android.os.SystemClock.elapsedRealtime())
+        val drawnAt: Long
+        synchronized(APM) {
+            APM.start(app, config())                                                   // returns at once; assembly is parked on the lock
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMillis(900))
+            // Window attached BEFORE resume: Robolectric does not carry a listener added to the not-yet-attached view's
+            // floating ViewTreeObserver over to the real one the way a device does, and that merge is not under test here.
+            val launch = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).create().start().postCreate(null).visible().resume()
+            dispatchDraw(launch.get())
+            drawnAt = android.os.SystemClock.elapsedRealtime()
+            org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(20))
+            launch.pause().resume()                                                    // the user comes back: NOT a cold start
+            dispatchDraw(launch.get())
+        }
+        assertTrue(APM.awaitStarted(10_000))
+        assertTrue(ApmRuntime.current!!.awaitCaptureDrain(5_000))
+
+        val events = coldStarts()
+        assertEquals("exactly one cold start, for the real first frame", 1, events.size)
+        assertEquals(
+            "measured to the frame that was drawn, not to the later resume",
+            drawnAt - android.os.Process.getStartElapsedRealtime(),
+            events.single().attrs.getValue("duration_ms").toString().toLong()
+        )
+    }
+
+    // ─── A48 · activity state when assembly outlasts the launch activity ────────
+
+    private fun lastError() = ApmRuntime.current!!.queue.peek(50).map { it.event }
+        .last { it.type == edts.apm.android.sdk.core.EventType.ERROR }
+
+    /**
+     * Same setup as A46: assembly is held on the `APM` monitor while the launch activity starts and resumes, so the
+     * graph is built AFTER them. `volatileContext` and the screen breadcrumbs used to be registered inside the
+     * assembly and never saw those callbacks: an event captured in the foreground said `app_state: background`, had no
+     * `screen`, and the trail had no first-screen entry.
+     */
+    @Test fun `app state, screen and first-screen breadcrumb are right when assembly finishes after the launch activity (A48)`() {
+        assertEquals(android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
+        synchronized(APM) {
+            APM.start(app, config())
+            org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()   // started + resumed, graph not built yet
+        }
+        assertTrue(APM.awaitStarted(10_000))
+
+        APM.logError(IllegalStateException("captured in the foreground"))
+        assertTrue(ApmRuntime.current!!.awaitCaptureDrain(5_000))
+
+        val event = lastError()
+        assertEquals("foreground", event.ctx.appState)
+        assertEquals("Activity", event.ctx.screen)
+        val trail = event.attrs.getValue("breadcrumbs").jsonPrimitive.content   // the snapshot is a JSON string inside the JSON
+        assertTrue("the launch screen is in the trail: $trail", trail.contains("\"category\":\"navigation\"") && trail.contains("Activity"))
+        assertTrue("and so is the foreground transition: $trail", trail.contains("\"message\":\"foreground\""))
+    }
+
+    @Test fun `a second activity starting while the first stops does not look like the app going to the background (A48)`() {
+        assertEquals(android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
+        val first: org.robolectric.android.controller.ActivityController<android.app.Activity>
+        synchronized(APM) {
+            APM.start(app, config())
+            first = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()
+        }
+        assertTrue(APM.awaitStarted(10_000))
+        val sessionBefore = ApmRuntime.current!!.sessionManager.sessionId
+
+        // A -> B: B starts before A stops. A counter that never saw A's start reaches 0 here and reports "background".
+        val second = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java).setup()
+        first.pause().stop()
+        APM.logError(IllegalStateException("on the second screen"))
+        assertTrue(ApmRuntime.current!!.awaitCaptureDrain(5_000))
+
+        assertEquals("foreground", lastError().ctx.appState)
+        val trail = lastError().attrs.getValue("breadcrumbs").jsonPrimitive.content
+        assertFalse("no spurious background transition: $trail", trail.contains("\"message\":\"background\""))
+        assertEquals(sessionBefore, ApmRuntime.current!!.sessionManager.sessionId)
+        second.get()   // keep the reference alive for the duration of the assertions
     }
 
     // ─── A40 · through the graph APM.start() assembles ──────────────────────────

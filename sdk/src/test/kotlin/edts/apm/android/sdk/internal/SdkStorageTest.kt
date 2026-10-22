@@ -35,6 +35,7 @@ class SdkStorageTest {
         context.getSharedPreferences(SdkStorage.LEGACY_PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
         File(context.filesDir, SdkStorage.QUEUE_DIR_NAME).deleteRecursively()
         File(context.filesDir, SdkStorage.CONFIG_CACHE_NAME).delete()
+        File(context.filesDir, SdkStorage.ABANDONED_NATIVE_CRASH_DIR_NAME).deleteRecursively()
         SdkStorage.queueDir(context).deleteRecursively()
         SdkStorage.configCache(context).delete()
     }
@@ -144,6 +145,43 @@ class SdkStorageTest {
         SdkStorage.migrateLegacy(context) { asked = true; null }
 
         assertFalse("a package-manager binder call on every cold start would be pure waste", asked)
+    }
+
+    // ─── A47 · the directory an xCrash-era build left in filesDir ───────────────
+
+    private fun abandonedDir() = File(context.filesDir, SdkStorage.ABANDONED_NATIVE_CRASH_DIR_NAME)
+
+    @Test fun `the name is the one the xCrash-era build wrote, and it is in the backup-eligible filesDir`() {
+        // Seen in a real `bmgr backupnow` archive: files/apm-native-crash/tombstone_….xcrash (checklist 19).
+        assertEquals("apm-native-crash", SdkStorage.ABANDONED_NATIVE_CRASH_DIR_NAME)
+        assertEquals(context.filesDir.canonicalPath, abandonedDir().parentFile!!.canonicalPath)
+    }
+
+    @Test fun `a leftover tombstone directory is deleted, files and all`() {
+        File(abandonedDir().apply { mkdirs() }, "tombstone_00001.xcrash").writeText("stack trace and memory map")
+        File(abandonedDir(), "nested").apply { mkdirs() }.let { File(it, "x").writeText("y") }
+
+        assertTrue(SdkStorage.deleteAbandonedNativeCrashDir(context))
+
+        assertFalse("the backup-eligible copy must be gone", abandonedDir().exists())
+    }
+
+    @Test fun `with nothing left it does nothing and reports so`() {
+        assertFalse(SdkStorage.deleteAbandonedNativeCrashDir(context))
+        assertFalse(SdkStorage.deleteAbandonedNativeCrashDir(context))   // and again: idempotent
+    }
+
+    @Test fun `it never touches the queue, the config cache or the state - they are in the no-backup root`() {
+        legacyEvent("000-pending.evt", "pending", 1_000L)             // an old queue awaiting migration
+        File(SdkStorage.queueDir(context).apply { mkdirs() }, "000-new.evt").writeText("new")
+        SdkStorage.configCache(context).writeText("{}")
+        File(abandonedDir().apply { mkdirs() }, "tombstone_1.xcrash").writeText("x")
+
+        SdkStorage.deleteAbandonedNativeCrashDir(context)
+
+        assertTrue(legacyQueue().isDirectory)
+        assertTrue(File(SdkStorage.queueDir(context), "000-new.evt").isFile)
+        assertTrue(SdkStorage.configCache(context).isFile)
     }
 
     // ─── A40 · the SDK's key-value state ────────────────────────────────────────

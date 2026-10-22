@@ -8,7 +8,7 @@ import android.app.ApplicationExitInfo
  * (including plain `REASON_CRASH`, which our own [JvmCrashHandler] already reports separately
  * as a `crash` event) maps to `null`, i.e. don't emit — same treatment as spec's `unexplained`.
  */
-object TerminationReasonMapper {
+internal object TerminationReasonMapper {
     fun map(reason: Int): String? = when (reason) {
         ApplicationExitInfo.REASON_LOW_MEMORY -> "memory_pressure"
         else -> null

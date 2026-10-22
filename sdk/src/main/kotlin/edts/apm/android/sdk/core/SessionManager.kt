@@ -9,7 +9,7 @@ import java.util.UUID
  * Thread-safe via @Volatile on scalar fields and synchronized session rotation.
  * Clock is injectable for unit testing.
  */
-class SessionManager(
+internal class SessionManager(
     private val clock: () -> Long = { System.currentTimeMillis() },
     /**
      * Called with every new session id, including the first (A28). The composition root persists it so

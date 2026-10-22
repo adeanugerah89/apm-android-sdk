@@ -9,7 +9,7 @@ import kotlinx.serialization.Serializable
  * Full implementation in A7.
  */
 @Serializable
-enum class BreadcrumbCategory {
+public enum class BreadcrumbCategory {
     @SerialName("navigation")    NAVIGATION,
     @SerialName("user_action")   USER_ACTION,
     @SerialName("network")       NETWORK,
@@ -19,7 +19,7 @@ enum class BreadcrumbCategory {
 }
 
 @Serializable
-enum class BreadcrumbLevel {
+public enum class BreadcrumbLevel {
     @SerialName("debug")   DEBUG,
     @SerialName("info")    INFO,
     @SerialName("warning") WARNING,

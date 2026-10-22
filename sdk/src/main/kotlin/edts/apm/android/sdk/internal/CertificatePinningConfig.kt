@@ -20,13 +20,13 @@ import okhttp3.CertificatePinner
  * this, and the SDK may never take the host down (CONSTITUTION rule #1); `null` degrades to the
  * default — no pinning, TLS floor still enforced by [TlsPolicy].
  */
-class CertificatePinningConfig private constructor(
-    val hostname: String,
+public class CertificatePinningConfig private constructor(
+    public val hostname: String,
     /** SPKI SHA-256 pins in OkHttp's `sha256/<base64>` form. Always at least two. */
-    val pins: List<String>
+    public val pins: List<String>
 ) {
 
-    fun toCertificatePinner(): CertificatePinner {
+    public fun toCertificatePinner(): CertificatePinner {
         val builder = CertificatePinner.Builder()
         // Not `apply { pins.forEach ... }`: inside that scope `pins` resolves to the OkHttp
         // builder's own field, silently pinning nothing.
@@ -41,7 +41,7 @@ class CertificatePinningConfig private constructor(
 
     override fun toString(): String = "CertificatePinningConfig($hostname, ${pins.size} pins)"
 
-    companion object {
+    public companion object {
         /**
          * Builds a pinning config, or `null` when [hostname] is blank or any pin is not a
          * SHA-256 SPKI hash in base64.
@@ -53,7 +53,7 @@ class CertificatePinningConfig private constructor(
          * to the same stored form, so a copy-pasted pin from either common tool works.
          */
         @JvmStatic
-        fun of(
+        public fun of(
             hostname: String,
             primary: String,
             backup: String,

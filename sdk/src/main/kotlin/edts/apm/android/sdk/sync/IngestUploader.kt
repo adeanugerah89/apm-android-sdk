@@ -13,13 +13,13 @@ import okio.buffer
 import java.io.IOException
 import java.net.UnknownServiceException
 
-sealed class UploadResult {
+internal sealed class UploadResult {
     data class HttpResponse(val statusCode: Int, val retryAfterSeconds: Long?) : UploadResult()
     data class TransportFailure(val exception: IOException) : UploadResult()
 }
 
 /** Seam for tests to substitute a fake — see [IngestUploader] for the real implementation. */
-interface Uploader {
+internal interface Uploader {
     fun upload(envelope: Envelope): UploadResult
 }
 
@@ -37,7 +37,7 @@ interface Uploader {
  * client that lacks the TLS floor. A telemetry payload must never leave over an unprotected
  * connection because one composition site was wired wrong.
  */
-class IngestUploader(
+internal class IngestUploader(
     private val client: Call.Factory,   // OkHttpClient, or a PinnedCallFactory wrapping two
     private val ingestUrl: String,
     private val appKey: String,

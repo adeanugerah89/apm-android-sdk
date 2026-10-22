@@ -14,7 +14,7 @@ import okhttp3.TlsVersion
  * cannot tighten the host app's TLS settings without breaking apps that legitimately use
  * cleartext, so it tightens its own and documents the rest — see [apm_network_security_config].
  */
-object TlsPolicy {
+internal object TlsPolicy {
 
     /**
      * TLS 1.2 and 1.3 only. Deliberately built from [ConnectionSpec.MODERN_TLS]'s cipher suites

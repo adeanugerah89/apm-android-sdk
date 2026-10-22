@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
  * Thread-safe: the current value is an [AtomicReference], read from capture and sync paths on
  * arbitrary threads. [refresh] performs blocking I/O and must be called off the main thread.
  */
-class RemoteConfigProvider(
+internal class RemoteConfigProvider(
     private val store: RemoteConfigStore,
     private val fetcher: ConfigFetcher
 ) {

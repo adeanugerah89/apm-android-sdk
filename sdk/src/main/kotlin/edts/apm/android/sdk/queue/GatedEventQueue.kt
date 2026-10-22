@@ -22,7 +22,7 @@ import edts.apm.android.sdk.core.EventType
  * [edts.apm.android.sdk.sync.SyncEngine]), and if the switch flips back on, that backlog is
  * still valid data that was captured while capture was legitimately enabled.
  */
-class GatedEventQueue(
+internal class GatedEventQueue(
     private val delegate: EventQueue,
     private val configProvider: () -> RemoteConfig
 ) : EventQueue {

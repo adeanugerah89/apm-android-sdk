@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Cumulative per install — sent in every envelope so drop spikes are visible outside the device.
  * Thread-safe: all mutations via AtomicLong / ConcurrentHashMap.
  */
-class SdkHealth {
+internal class SdkHealth {
     private val written   = AtomicLong(0)
     private val sent      = AtomicLong(0)
     private val dropped   = AtomicLong(0)
@@ -32,7 +32,7 @@ class SdkHealth {
 }
 
 /** Known drop reasons — open set on the wire (§2.3 "drop_reasons bersifat terbuka"). */
-enum class DropReason(val key: String) {
+internal enum class DropReason(val key: String) {
     QUEUE_FULL("queue_full"),
     REJECTED("rejected"),          // 400 from ingest
     UNDECODABLE("undecodable"),    // file we can't parse (pre-encryption plaintext, A14)
@@ -40,7 +40,7 @@ enum class DropReason(val key: String) {
 
 /** Serializable snapshot for inclusion in the envelope. */
 @Serializable
-data class SdkHealthSnapshot(
+internal data class SdkHealthSnapshot(
     val written: Long,
     val sent: Long,
     val dropped: Long,

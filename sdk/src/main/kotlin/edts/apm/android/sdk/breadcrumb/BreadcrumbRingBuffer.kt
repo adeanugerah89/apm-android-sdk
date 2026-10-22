@@ -15,7 +15,7 @@ import kotlin.concurrent.withLock
  * passes through the same SEC-05 pattern scrubbing as every other attrs value automatically,
  * with no special-cased path required.
  */
-class BreadcrumbRingBuffer(private val clock: () -> Long = System::currentTimeMillis) {
+internal class BreadcrumbRingBuffer(private val clock: () -> Long = System::currentTimeMillis) {
     private val lock = ReentrantLock()
     private val entries = ArrayDeque<BreadcrumbEntry>(CAPACITY)
     private val json = Json { encodeDefaults = true }
@@ -54,7 +54,7 @@ class BreadcrumbRingBuffer(private val clock: () -> Long = System::currentTimeMi
  * the contract says `0` is written explicitly and never omitted: an absent field is read by the
  * backend as "an SDK older than the buffer fix", which would be a false signal for this one.
  */
-fun JsonObjectBuilder.putBreadcrumbSnapshot(snapshot: String) {
+internal fun JsonObjectBuilder.putBreadcrumbSnapshot(snapshot: String) {
     put("breadcrumbs", snapshot)
     put("breadcrumbs_dropped", "0")
 }

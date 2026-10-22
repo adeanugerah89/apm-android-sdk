@@ -1,7 +1,7 @@
 package edts.apm.android.sdk.internal
 
 /** `source_file`/`source_function`/`source_line` for a manually-reported error (MOB-11b). */
-data class CallSite(val file: String, val function: String, val line: Int) {
+internal data class CallSite(val file: String, val function: String, val line: Int) {
     companion object {
         val UNKNOWN = CallSite(file = "unknown", function = "unknown", line = -1)
     }
@@ -15,7 +15,7 @@ data class CallSite(val file: String, val function: String, val line: Int) {
  * `StackTraceElement.fileName` is a bare filename (e.g. "LoginActivity.kt"), never an absolute
  * path — unlike iOS's rejected `#file`, there is no build-machine username to leak here.
  */
-object CallSiteLocator {
+internal object CallSiteLocator {
     // Package prefix for this SDK's own compiled classes — frames here are skipped so the
     // located frame is always the caller, not internal plumbing (APM.logError, this object, ...).
     private const val SDK_PACKAGE_PREFIX = "edts.apm.android.sdk"

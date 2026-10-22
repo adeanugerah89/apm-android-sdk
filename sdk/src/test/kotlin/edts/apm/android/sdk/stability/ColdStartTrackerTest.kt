@@ -23,14 +23,14 @@ class ColdStartTrackerTest {
 
     private fun tracker(
         queue: EventQueue,
-        processStartUptimeMs: Long = 1_000L,
+        processStartElapsedMs: Long = 1_000L,
         nowMs: Long = 1_850L,
         enabled: () -> Boolean = { true }
     ) = ColdStartTracker(
         queue = queue,
         seqProvider = { 3L },
         contextProvider = { EventContext(appState = "foreground") },
-        processStartUptimeMs = processStartUptimeMs,
+        processStartElapsedMs = processStartElapsedMs,
         isEnabled = enabled,
         elapsedRealtime = { nowMs }
     )
@@ -49,9 +49,18 @@ class ColdStartTrackerTest {
     @Test fun `duration is measured from process start, not from SDK init`() {
         val queue = RecordingQueue()
 
-        tracker(queue, processStartUptimeMs = 500L, nowMs = 3_000L).onFirstFrame()
+        tracker(queue, processStartElapsedMs = 500L, nowMs = 3_000L).onFirstFrame()
 
         assertEquals("2500", queue.events.single().attrs.getValue("duration_ms").jsonPrimitive.content)
+    }
+
+    @Test fun `duration uses the time the frame was drawn, not the time the tracker was told (A46)`() {
+        val queue = RecordingQueue()
+
+        // Told at 9_000 about a frame drawn at 1_850: assembly finished long after the frame.
+        assertEquals(850L, tracker(queue, nowMs = 9_000L).onFirstFrame(frameElapsedRealtimeMs = 1_850L))
+
+        assertEquals("850", queue.events.single().attrs.getValue("duration_ms").jsonPrimitive.content)
     }
 
     @Test fun `fires at most once per process`() {
@@ -68,7 +77,7 @@ class ColdStartTrackerTest {
 
         val duration = tracker(
             queue,
-            processStartUptimeMs = 0L,
+            processStartElapsedMs = 0L,
             nowMs = ColdStartTracker.MAX_PLAUSIBLE_COLD_START_MS + 1
         ).onFirstFrame()
 
@@ -79,7 +88,7 @@ class ColdStartTrackerTest {
     @Test fun `a negative measurement is discarded rather than sent as nonsense`() {
         val queue = RecordingQueue()
 
-        assertNull(tracker(queue, processStartUptimeMs = 5_000L, nowMs = 4_000L).onFirstFrame())
+        assertNull(tracker(queue, processStartElapsedMs = 5_000L, nowMs = 4_000L).onFirstFrame())
         assertTrue(queue.events.isEmpty())
     }
 

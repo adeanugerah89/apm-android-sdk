@@ -1376,3 +1376,87 @@ KDoc instead of being paid for.
 (`app/build.gradle.kts`, debug variants only) copies `tools/device-testing/server.crt` if present, otherwise makes a
 throwaway certificate and discards its key. `server.key`, `server.crt` and `received.json` are git-ignored.
 
+### 2026-10-06 · A46: the first frame is recorded where it happens and delivered when the tracker exists
+
+A device run against `apm-ingest` showed no cold-start events, and then a wrong one. **Decisions:**
+
+**1. Anything that must see the launch activity is registered at the top of `APM.start()`, not inside the assembly.**
+`start()` assembles in the background when called from the main thread (A18), and on a slow device the launch
+activity has resumed and drawn before the graph exists. `ApmBootstrap.observeLaunch()` therefore registers the
+`ColdStartFirstFrameObserver` synchronously on the caller's thread — a lifecycle-callback registration does no I/O, so
+it does not reopen A18's main-thread rule — and the observer records *when* the first frame was drawn; `attach()`
+delivers that time to the tracker whenever it is built. The failure it replaces was worse than a missing event: an
+observer registered late fired on the *next* resume and reported the time until the user came back as a cold start.
+The 60 s plausibility cap is kept, but it is a backstop, not the defence.
+
+**2. The cold-start clock is `Process.getStartElapsedRealtime()`.** `getStartUptimeMillis()` is on the uptime
+timebase (it stops in deep sleep) and was subtracted from `elapsedRealtime()`, so every second a device had ever slept
+was added to every cold start. Both ends are now `elapsedRealtime`. Not observable on an emulator, which does not sleep.
+
+**3. Out of scope, recorded as A48:** the other lifecycle callbacks (`volatileContext`, screen breadcrumbs) have the same
+late-registration flaw and the device run showed `app_state: "background"` on a foreground event. One feature at a time.
+
+### 2026-10-06 · A48: callbacks that missed the launch are replayed, not re-created
+
+**1. One early recorder, replay on attach (extends the A46 entry).** Everything fed by activity callbacks — the
+started-activity counter behind `app_state`, the current screen, the first-screen breadcrumb — was registered inside the
+background assembly and missed the launch activity on a slow device. `ActivityStateRecorder` is registered at the top of
+`APM.start()` beside the cold-start observer; `VolatileContextProvider` and `ScreenTrackingLifecycleCallbacks` keep their
+own logic and tests and are `attach()`ed to it, which replays the started activities and the last resumed one and then
+forwards live. Chosen over seeding the provider with a snapshot because a snapshot leaves a window in which a callback
+on the main thread is missed or counted twice; here the replay and the hand-over to live delivery are one critical section.
+
+**2. A delegate that throws is isolated.** Callbacks registered straight on the `Application` ran inside the host's
+lifecycle dispatch, so an exception in one propagated into the host app (rule #1). The recorder is now the only thing the
+SDK registers for these, and it catches around every delegate.
+
+**3. The replayed first-screen breadcrumb carries the time the SDK came up**, not the time the screen appeared. The order in
+the trail is right and the error is bounded by assembly time; recording the true time would need the breadcrumb buffer to
+accept a timestamp from a callback interface that has no place for one, which was not worth a new seam.
+
+**4. A randomised stress test is not evidence for a nanosecond race.** The first concurrency test passed against code with
+the replay and the registration split into two critical sections. It was replaced by one that forces the interleaving
+(the replay callback starts an activity on another thread and waits). Verified by running the broken variant.
+
+### 2026-10-12 · A49: `normalizePath` follows `docs/02` §6.1.1 literally; the PII fallback stays, last
+
+**1. The six rules and the 23-vector table are the spec, copied into a test.** `docs/02` §6.1.1 is binding on both
+platforms and says to pass identical vectors rather than translate the prose, so `PathNormalizationVectorsTest` holds
+each row's input and output verbatim (row number in the test name). The prose rules were then written to satisfy them.
+Vector 23 is a statement about SEC-03 (a query string) and cannot reach Android, whose `req.url.encodedPath` carries none
+(A38); only its path half is asserted.
+
+**2. The `REDACT_PATTERN` fallback is kept as a seventh, last step — a decision for the owner to overturn.** The old
+function sent a segment holding an email or a JWT-shaped string to `{id}`; the spec's six rules do not (`a@b.com` has no
+digit, is not kebab-case, and contains characters rule 5 does not allow, so it ends at rule 6 unchanged). Dropping it would
+put an email address on the wire in `path` for the sake of byte-identical output on inputs no row of the table contains.
+Keeping it changes nothing the table pins: every row with a digit ends at rule 3 and no unchanged row has an `@` or a dotted
+token. **If iOS does not do the same, the platforms differ on a path segment shaped like an email** — say so to the iOS
+owner; do not remove it here without that conversation.
+
+**3. Rule 1 is not dead code.** A UUID without any digit (`abcdefab-abcd-…`) matches rule 4's kebab pattern, so without
+rule 1 it would pass through unchanged — an identifier, not a word. Found by a negative control that removed rule 1 and
+saw no test fail; one test now pins it.
+
+**4. The old test that contradicted the spec was rewritten, not deleted.** `/api/v2/items/1` used to stay unchanged
+(the ≥5-digit threshold); it is now `/api/v2/items/{id}`, with the version segment still exempt.
+
+### 2026-10-22 · A43: the supported API is enforced by the compiler (`internal` + strict explicit-API mode)
+
+`RELEASING.md` already said the supported API is exactly what `consumer-rules.pro` keeps (`APM`, `ApmConfig`,
+`CertificatePinningConfig`, `BreadcrumbCategory`, `BreadcrumbLevel`); the code did not say it — every class was
+`public`, so any signature change looked like a breaking change against 0.1.0 and an adopter could depend on an
+implementation type without a warning. Now:
+
+- Every other top-level declaration is `internal` (91 of them, 60 files). The module builds with `kotlin { explicitApi() }`
+  (strict): the compiler lists every declaration that is public without an explicit `public`, so the surface cannot
+  grow by accident. Unit and instrumented tests are in the same module and still see `internal`.
+- **The public surface of the five types is byte-for-byte what 0.1.0 shipped** (`javap -public` diff, 92 lines,
+  identical). `CertificatePinningConfig` stays in the `internal` *package* and keeps its public members
+  (`hostname`, `pins`, `toCertificatePinner()`): moving or trimming them would be a breaking change for no gain.
+- **Adding to the supported list** now takes three visible edits in one change: `consumer-rules.pro`, an explicit
+  `public`, and the list in `RELEASING.md`.
+- **Limit, stated plainly:** `internal` is a Kotlin-compiler rule. The classes remain `public` in bytecode (233
+  classes in the AAR) — required anyway for WorkManager to instantiate `SyncWorker` reflectively — so Java callers and
+  reflection can still reach them. The promise is *unsupported*, not *unreachable*.
+

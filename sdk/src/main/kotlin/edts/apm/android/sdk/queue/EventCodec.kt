@@ -20,7 +20,7 @@ import kotlinx.serialization.json.Json
  * Both directions return `null` on failure. A null from [encode] means nothing is written; a null
  * from [decode] means the file is unreadable and is purged by [DiskEventQueue].
  */
-interface EventCodec {
+internal interface EventCodec {
     fun encode(event: Event): ByteArray?
     fun decode(bytes: ByteArray): Event?
 }
@@ -48,7 +48,7 @@ private data class StoredEvent(
  * queue's worth of real telemetry on every upgrade — the same reasoning as the plaintext-after-
  * encryption path below. Both start with `{`, so [AesGcmQueueCipher.looksEncrypted] is unaffected.
  */
-class JsonEventCodec(
+internal class JsonEventCodec(
     private val json: Json = Json { encodeDefaults = true }
 ) : EventCodec {
 
@@ -96,7 +96,7 @@ class JsonEventCodec(
  * JVM crash path (A9) runs in ordinary JVM context — see [edts.apm.android.sdk.crash.JvmCrashHandler].
  * It will apply to the native path when A9b lands.
  */
-class EncryptedEventCodec(
+internal class EncryptedEventCodec(
     private val cipher: QueueCipher,
     private val plain: JsonEventCodec = JsonEventCodec()
 ) : EventCodec {

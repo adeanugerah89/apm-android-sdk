@@ -4,7 +4,7 @@ package edts.apm.android.sdk.sync
  * Exponential backoff for `5xx` / unrecognized ingest responses. (MOB-07, `01` §7)
  * Sequence: 30s -> 60s -> 120s -> ... capped at 30 minutes.
  */
-object BackoffPolicy {
+internal object BackoffPolicy {
     const val INITIAL_DELAY_MS = 30_000L
     const val MAX_DELAY_MS = 30 * 60 * 1000L
     private const val MAX_SHIFT = 20  // guards against Long overflow from shifting too far

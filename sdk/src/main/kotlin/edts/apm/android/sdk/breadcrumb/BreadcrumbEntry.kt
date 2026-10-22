@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 /** One ring buffer entry — `01` §4.5.1. Field names are the literal wire keys, lowercase. */
 @Serializable
-data class BreadcrumbEntry(
+internal data class BreadcrumbEntry(
     val timestamp: String,   // ISO-8601 UTC
     val category: BreadcrumbCategory,
     val level: BreadcrumbLevel,

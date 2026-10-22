@@ -8,7 +8,7 @@ import okhttp3.Call
 import okhttp3.Request
 import java.io.IOException
 
-sealed class ConfigFetchResult {
+internal sealed class ConfigFetchResult {
     /**
      * [viaUnpinnedFallback]: this config arrived over the unpinned recovery path (SEC-11). The provider treats
      * it as untrusted-by-construction: only its "switch pinning off" part is honoured, in memory, never cached.
@@ -19,7 +19,7 @@ sealed class ConfigFetchResult {
 }
 
 /** Seam for tests and for the provider, which must not depend on OkHttp directly. */
-interface ConfigFetcher {
+internal interface ConfigFetcher {
     fun fetch(): ConfigFetchResult
 }
 
@@ -38,7 +38,7 @@ interface ConfigFetcher {
  * Never throws — a fetch failure is an ordinary outcome, handled by falling back to cache or
  * default in [RemoteConfigProvider].
  */
-class RemoteConfigFetcher(
+internal class RemoteConfigFetcher(
     private val client: Call.Factory,   // OkHttpClient, or a PinnedCallFactory wrapping two
     private val configUrl: String,
     private val appKey: String,

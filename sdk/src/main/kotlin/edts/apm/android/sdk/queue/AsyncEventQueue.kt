@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit
  * — the failure mode the 8 MB memory budget exists to prevent — so an overflow is dropped and
  * counted as [DropReason.QUEUE_FULL], visible in `sdk.health` (§2.3) like any other loss.
  */
-class AsyncEventQueue(
+internal class AsyncEventQueue(
     private val delegate: EventQueue,
     private val health: SdkHealth,
     maxPending: Int = MAX_PENDING

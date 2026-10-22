@@ -10,7 +10,7 @@ import android.net.Network
  * than to record history; keeping them independent avoids coupling two unrelated concerns to
  * one callback's lifecycle.
  */
-class ConnectivityBreadcrumbSource(
+internal class ConnectivityBreadcrumbSource(
     private val context: Context,
     private val ringBuffer: BreadcrumbRingBuffer
 ) {

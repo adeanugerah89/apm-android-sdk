@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Backend uses seq to order events when ts_client is unreliable.
  * Resets when a new session starts.
  */
-class EventSequencer {
+internal class EventSequencer {
     private val counter = AtomicLong(0)
 
     fun next(): Long = counter.incrementAndGet()

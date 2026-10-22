@@ -14,7 +14,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * a developer passes through the manual API later (A6/A7) without relying on caller discipline
  * (SEC-05b).
  */
-object Scrubber {
+internal object Scrubber {
 
     private val JWT_LIKE = Regex("""[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}""")
     private val EMAIL = Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")
@@ -29,23 +29,43 @@ object Scrubber {
     private val UUID_SEGMENT = Regex(
         "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     )
-    private val LONG_NUMERIC_SEGMENT = Regex("""^\d{5,}$""")
+    // SEC-03b rule 2: a bare version segment (`v2`, `v2.1`, `V3`) is not an id.
+    private val VERSION_SEGMENT = Regex("""^v\d+(\.\d+)*$""", RegexOption.IGNORE_CASE)
+    // Rule 4: lowercase words joined by single hyphens — a human-written route name. Also matches
+    // one lowercase word with no hyphen at all, so a long all-lowercase segment is a word, not a token.
+    private val KEBAB_WORD_SEGMENT = Regex("""^[a-z]+(-[a-z]+)*$""")
+    // Rule 5: an opaque token. It only gets this far with no digit and not a kebab-case word.
+    private val OPAQUE_TOKEN_SEGMENT = Regex("""^[A-Za-z0-9_-]{24,}$""")
 
     /** SEC-05: replace every PII-shaped substring with `[REDACTED]`. Safe to call on any string. */
     fun redact(text: String): String = REDACT_PATTERN.replace(text) { "[REDACTED]" }
 
     /**
-     * SEC-03b: normalize identity-like path segments to `{id}` for backend grouping quality.
-     * `/user/628123456789/profile` -> `/user/{id}/profile`.
-     * Also runs [redact] per segment as a fallback for identity patterns that aren't purely
-     * numeric/UUID (e.g. an email accidentally used as a path segment).
+     * SEC-03b (`docs/02` §6.1.1, binding on both platforms): replace identity-like path segments
+     * with `{id}`. Rules run per segment, in this order, and the first match wins:
+     * 1. UUID -> `{id}`
+     * 2. version segment (`v2`, `v2.1`, `V3`) -> unchanged (before rule 3, or `v2` would match it)
+     * 3. contains any digit -> `{id}`
+     * 4. lowercase kebab-case word(s), any length -> unchanged
+     * 5. no digit, length >= 24, only `[A-Za-z0-9_-]` -> `{id}` (opaque token)
+     * 6. anything else -> unchanged
+     *
+     * Android-only safeguard, applied last: a segment the six rules leave alone but that still
+     * holds a PII shape — an email accidentally used as a path segment, a JWT-shaped one — becomes
+     * `{id}` too ([REDACT_PATTERN]). No row of the §6.1.1 table reaches it (every row with a digit
+     * ends at rule 3, and none of the unchanged rows has an `@` or a dotted token).
+     *
+     * Takes the path only; a query string is SEC-03's job ([scrubQueryParams]).
      */
     fun normalizePath(path: String): String =
         path.split('/').joinToString("/") { segment ->
             when {
                 segment.isEmpty() -> segment
                 UUID_SEGMENT.matches(segment) -> "{id}"
-                LONG_NUMERIC_SEGMENT.matches(segment) -> "{id}"
+                VERSION_SEGMENT.matches(segment) -> segment
+                segment.any { it in '0'..'9' } -> "{id}"
+                KEBAB_WORD_SEGMENT.matches(segment) -> segment
+                OPAQUE_TOKEN_SEGMENT.matches(segment) -> "{id}"
                 REDACT_PATTERN.containsMatchIn(segment) -> "{id}"
                 else -> segment
             }

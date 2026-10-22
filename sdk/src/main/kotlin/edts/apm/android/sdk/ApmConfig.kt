@@ -14,7 +14,7 @@ import edts.apm.android.sdk.internal.CertificatePinningConfig
  * the type signature rather than in a validation rule that a future call site could route around.
  * See `02` §6.3 for why this stays opt-in.
  */
-data class ApmConfig(
+public data class ApmConfig(
     val appId: String,
     val appVersion: String,
     val appBuild: String,

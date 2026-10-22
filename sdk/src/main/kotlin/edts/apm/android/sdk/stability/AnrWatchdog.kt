@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * One block produces one event: [reported] latches until the main thread responds again, so a
  * ten-second freeze is one ANR, not one per poll.
  */
-class AnrWatchdog(
+internal class AnrWatchdog(
     private val queue: EventQueue,
     private val seqProvider: () -> Long,
     private val contextProvider: () -> EventContext,

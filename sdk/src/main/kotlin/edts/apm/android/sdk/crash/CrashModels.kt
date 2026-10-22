@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
  * `symbolName`/`file`/`line` are filled directly at capture time instead.
  */
 @Serializable
-data class CrashFrame(
+internal data class CrashFrame(
     val index: Int,
     @SerialName("object_name") val objectName: String? = null,
     @SerialName("object_addr") val objectAddr: String? = null,
@@ -22,7 +22,7 @@ data class CrashFrame(
 )
 
 @Serializable
-data class CrashThread(
+internal data class CrashThread(
     val index: Int,
     val crashed: Boolean,
     val name: String,
@@ -30,7 +30,7 @@ data class CrashThread(
 )
 
 @Serializable
-data class BinaryImage(
+internal data class BinaryImage(
     val name: String,
     val uuid: String,
     @SerialName("base_addr") val baseAddr: String,

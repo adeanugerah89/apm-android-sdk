@@ -33,16 +33,18 @@ The supported API is **exactly what `consumer-rules.pro` keeps**: `APM`, `ApmCon
 adopting app with their names intact, so only those can be called, referenced or reflected on by name.
 
 Everything else — `Event`, `EventQueue`, `SyncEngine`, `UserIdProvider`, `RemoteConfig`,
-`FailureCategoryMapper`, and every other class in the module — is **implementation**. It is declared
-`public` only because Kotlin visibility cannot span the packages of one module without it. It is **not**
-covered by the table above, may change in any release including a PATCH, and an adopter's R8 build renames
-it anyway. A change to those types is not a MAJOR bump.
+`FailureCategoryMapper`, and every other class in the module — is **implementation**. Since A43 (2026-10-22)
+it is declared `internal`, and the module builds with Kotlin's strict explicit-API mode, so the compiler
+enforces the list above: a declaration is public only if someone wrote `public` on it. It is **not** covered by
+the table above, may change in any release including a PATCH, and an adopter's R8 build renames it anyway. A
+change to those types is not a MAJOR bump.
 
 Two consequences are worth being explicit about. First, when a type has to be added to the supported list
-it must also be added to `consumer-rules.pro` in the same change, or the promise is empty. Second, this is a
-decision about *what we promise*, not about *what is visible*: making the implementation types `internal`
-would be better still, but it cascades through `EventQueue`, `Event` and `SyncEngine`, which appear in each
-other's public signatures, and is tracked as its own piece of work.
+it must also be added to `consumer-rules.pro` in the same change, **and** given an explicit `public` — the build
+refuses a public declaration without one, so the diff shows the promise being widened. Second, Kotlin's
+`internal` is enforced by the Kotlin compiler only: in bytecode those classes are still `public`, so a Java
+caller or reflection can reach them. The promise therefore stays what it was — *not supported, may change
+without notice* — with the compiler now stopping Kotlin adopters from depending on them by accident.
 
 **The wire contract is part of the public API.** An SDK talks to a backend that ships separately,
 so a field the SDK renames is as breaking as a method it deletes — and worse, because it fails at

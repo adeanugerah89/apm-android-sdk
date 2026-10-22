@@ -5,7 +5,7 @@ package edts.apm.android.sdk.crash
  * uncaught-exception handler. See CONSTITUTION 2026-09-07 (D1) for why address fields are
  * omitted and symbol info is filled immediately for Java frames.
  */
-object JvmStackTraceMapper {
+internal object JvmStackTraceMapper {
 
     /**
      * [allStacks] is typically `Thread.getAllStackTraces()`. The crashed thread is always

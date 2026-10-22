@@ -70,8 +70,14 @@ class ScrubberTest {
         )
     }
 
-    @Test fun `preserves short numeric and non-identity segments`() {
-        assertEquals("/api/v2/items/1", Scrubber.normalizePath("/api/v2/items/1"))
+    @Test fun `normalizes a short numeric segment but keeps the version segment`() {
+        // Was "preserves short numeric ..." under the old >=5-digit rule. SEC-03b (2026-10-12)
+        // drops that threshold: any digit makes an id, and only the version segment is exempt.
+        assertEquals("/api/v2/items/{id}", Scrubber.normalizePath("/api/v2/items/1"))
+    }
+
+    @Test fun `preserves non-identity segments`() {
+        assertEquals("/api/v2/items", Scrubber.normalizePath("/api/v2/items"))
     }
 
     @Test fun `normalizes segment containing an email to id placeholder`() {

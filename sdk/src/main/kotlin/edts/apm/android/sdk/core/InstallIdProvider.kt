@@ -10,7 +10,7 @@ import java.util.UUID
  * it back: `01` §2 says it resets with the install (A40).
  * NOT a user identifier — the SDK treats it as an installation token only. (§2)
  */
-class InstallIdProvider(private val prefs: SharedPreferences) {
+internal class InstallIdProvider(private val prefs: SharedPreferences) {
     private val KEY = "apm_install_id"
 
     /**

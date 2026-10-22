@@ -26,7 +26,7 @@ import javax.crypto.SecretKey
  * (`KeyStoreException: AndroidKeyStore not found`), so under test this class exercises exactly the
  * fallback branch. Key persistence across relaunch is on the device-only checklist.
  */
-class KeystoreKeyProvider(private val alias: String = DEFAULT_ALIAS) {
+internal class KeystoreKeyProvider(private val alias: String = DEFAULT_ALIAS) {
 
     /** Returns the existing key, creating it on first call. `null` if the Keystore is unusable. */
     fun getOrCreateKey(): SecretKey? = try {

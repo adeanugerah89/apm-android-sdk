@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Every accessor is defensive (CONSTITUTION rule #1): an unavailable system service yields `null`
  * for that field, never an exception into a capture path.
  */
-class VolatileContextProvider(
+internal class VolatileContextProvider(
     private val context: Context,
     /**
      * Fired on the 0→1 and 1→0 started-activity transitions. These exist so `SessionManager` and

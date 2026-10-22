@@ -18,7 +18,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * surface: an SDK that is off must be indistinguishable from an SDK that is absent, never a source
  * of exceptions in the host app's code.
  */
-object APM {
+public object APM {
 
     /**
      * Initializes the SDK. Call from `Application.onCreate()`. Thread-safe and idempotent.
@@ -33,9 +33,13 @@ object APM {
      * succeeded is a no-op.
      */
     @JvmStatic
-    fun start(context: Context, config: ApmConfig) {
+    public fun start(context: Context, config: ApmConfig) {
         if (ApmRuntime.isStarted) return
         val app = context.applicationContext
+
+        // A46: begin watching for the launch activity's first frame NOW, on this thread, before assembly is handed
+        // to a background thread that may finish after the frame was drawn. Registering a callback is not I/O.
+        try { ApmBootstrap.observeLaunch(app) } catch (e: Throwable) { Unit }
 
         // Assembly reads SharedPreferences, the config cache, the Keystore and the queue
         // directory — all blocking disk I/O, and `Application.onCreate()` runs on the main thread,
@@ -73,7 +77,7 @@ object APM {
      * the APIs simply no-op until assembly completes.
      */
     @JvmStatic
-    fun awaitStarted(timeoutMs: Long): Boolean {
+    public fun awaitStarted(timeoutMs: Long): Boolean {
         // Polls [ApmRuntime] rather than waiting on a latch. A latch here would be one-shot for the
         // life of the process, so a second start after a teardown would see it already open and
         // report success before assembly had run.
@@ -89,7 +93,7 @@ object APM {
 
     /** Whether [start] assembled a working SDK. False also means every call below is a no-op. */
     @JvmStatic
-    val isStarted: Boolean get() = ApmRuntime.isStarted
+    public val isStarted: Boolean get() = ApmRuntime.isStarted
 
     /**
      * The listener the host app attaches to **its own** OkHttpClient to capture network
@@ -108,7 +112,7 @@ object APM {
      * its own uploads even if the host app points this at a client that talks to both (MOB-10).
      */
     @JvmStatic
-    fun networkEventListener(): EventListener? {
+    public fun networkEventListener(): EventListener? {
         val components = ApmRuntime.current ?: return null
         val host = lastIngestHost ?: return null
         return ApmEventListener(
@@ -123,13 +127,13 @@ object APM {
     /** Report a handled error, with call-site location filled automatically. (MOB-11b) */
     @JvmStatic
     @JvmOverloads
-    fun logError(throwable: Throwable, extra: Map<String, String> = emptyMap()) {
+    public fun logError(throwable: Throwable, extra: Map<String, String> = emptyMap()) {
         safely { it.manualApi.logError(throwable, extra) }
     }
 
     /** Set the user identifier. Sent raw over TLS; the SDK never hashes it. (MOB-28, SEC-06) */
     @JvmStatic
-    fun setUser(id: String) {
+    public fun setUser(id: String) {
         safely { it.manualApi.setUser(id) }
     }
 
@@ -139,14 +143,14 @@ object APM {
      * Events captured *before* the call stay with the user they were captured under.
      */
     @JvmStatic
-    fun clearUser() {
+    public fun clearUser() {
         safely { it.manualApi.clearUser() }
     }
 
     /** Add a manual breadcrumb. (MOB-11) */
     @JvmStatic
     @JvmOverloads
-    fun breadcrumb(
+    public fun breadcrumb(
         message: String,
         category: BreadcrumbCategory,
         level: BreadcrumbLevel = BreadcrumbLevel.INFO

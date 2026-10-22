@@ -27,7 +27,7 @@ import java.util.UUID
  * the process fails to terminate normally after a real crash (CONSTITUTION rule #1's one
  * necessary exception: the crash handler runs precisely because something already went wrong).
  */
-class JvmCrashHandler(
+internal class JvmCrashHandler(
     private val queue: EventQueue,
     private val seqProvider: () -> Long,
     private val contextProvider: () -> EventContext,

@@ -12,7 +12,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /** A `user_id` with where it came from — `01` §2.1/§2.2. */
-data class UserIdentity(val id: String, val source: UserIdSource)
+internal data class UserIdentity(val id: String, val source: UserIdSource)
 
 /**
  * Manages `user_id` / `user_id_source` — MOB-28, `01` §2.1/§2.2 — **and which identity each event was
@@ -48,7 +48,7 @@ data class UserIdentity(val id: String, val source: UserIdSource)
  *
  * SEC-06: this class only hands the raw value to whoever builds the envelope's `user_id` slot.
  */
-class UserIdProvider(
+internal class UserIdProvider(
     private val prefs: SharedPreferences,
     private val cipher: QueueCipher? = null,
     /** Runs the encrypt-and-persist step. A single ordered background thread unless a test substitutes one. */

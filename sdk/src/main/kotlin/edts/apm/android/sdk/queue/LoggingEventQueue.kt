@@ -15,7 +15,7 @@ import edts.apm.android.sdk.core.Event
  * Attribute payloads are truncated: a native crash event serialises to tens of kilobytes, and
  * logcat drops long lines silently, which would make the log misleading rather than merely noisy.
  */
-class LoggingEventQueue(
+internal class LoggingEventQueue(
     private val delegate: EventQueue,
     private val isEnabled: () -> Boolean,
     private val log: (String, String) -> Unit = { tag, message -> android.util.Log.d(tag, message) }

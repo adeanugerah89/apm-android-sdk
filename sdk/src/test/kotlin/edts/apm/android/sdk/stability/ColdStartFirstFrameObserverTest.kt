@@ -35,9 +35,12 @@ class ColdStartFirstFrameObserverTest {
         queue = queue,
         seqProvider = { 1L },
         contextProvider = { EventContext(appState = "foreground") },
-        processStartUptimeMs = 0L,
+        processStartElapsedMs = 0L,
         elapsedRealtime = { 700L }
     )
+
+    private fun observerFor(tracker: ColdStartTracker, clock: () -> Long = { 700L }) =
+        ColdStartFirstFrameObserver(clock).also { it.attach(tracker) }
 
     private fun dispatchDraw(activity: Activity) {
         val observer = activity.window.decorView.viewTreeObserver
@@ -50,7 +53,7 @@ class ColdStartFirstFrameObserverTest {
     @Test fun `a drawn first frame produces exactly one cold_start event`() {
         val queue = RecordingQueue()
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val observer = ColdStartFirstFrameObserver(tracker(queue))
+        val observer = observerFor(tracker(queue))
 
         observer.onActivityResumed(activity)
         dispatchDraw(activity)
@@ -61,7 +64,7 @@ class ColdStartFirstFrameObserverTest {
     @Test fun `further draws after the first do not emit again`() {
         val queue = RecordingQueue()
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val observer = ColdStartFirstFrameObserver(tracker(queue))
+        val observer = observerFor(tracker(queue))
 
         observer.onActivityResumed(activity)
         dispatchDraw(activity)
@@ -75,7 +78,7 @@ class ColdStartFirstFrameObserverTest {
         val queue = RecordingQueue()
         val first = Robolectric.buildActivity(Activity::class.java).setup().get()
         val second = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val observer = ColdStartFirstFrameObserver(tracker(queue))
+        val observer = observerFor(tracker(queue))
 
         observer.onActivityResumed(first)
         observer.onActivityResumed(second)
@@ -88,7 +91,7 @@ class ColdStartFirstFrameObserverTest {
 
     @Test fun `the remaining lifecycle callbacks are no-ops and never crash`() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val observer = ColdStartFirstFrameObserver(tracker(RecordingQueue()))
+        val observer = observerFor(tracker(RecordingQueue()))
 
         observer.onActivityCreated(activity, null)
         observer.onActivityStarted(activity)
@@ -96,5 +99,73 @@ class ColdStartFirstFrameObserverTest {
         observer.onActivityStopped(activity)
         observer.onActivityDestroyed(activity)
         // No exception is the assertion.
+    }
+
+    // ─── A46 · the observer is registered before the tracker exists ─────────────
+
+    private fun durationOf(queue: RecordingQueue) =
+        queue.events.single().attrs.getValue("duration_ms").toString().toLong()
+
+    @Test fun `a frame drawn before the tracker is attached is reported, with the time it was drawn`() {
+        val queue = RecordingQueue()
+        var now = 600L
+        val observer = ColdStartFirstFrameObserver { now }       // registered early, no tracker yet
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+
+        observer.onActivityResumed(activity)
+        dispatchDraw(activity)                                    // the frame, at 600
+        assertTrue("nothing to report to yet", queue.events.isEmpty())
+        now = 9_000L                                              // assembly finishes much later
+        observer.attach(tracker(queue))
+
+        assertEquals(1, queue.events.size)
+        assertEquals("the frame's time, not the time the tracker arrived", 600L, durationOf(queue))
+    }
+
+    @Test fun `a later resume is never taken for the first frame`() {
+        val queue = RecordingQueue()
+        var now = 600L
+        val observer = ColdStartFirstFrameObserver { now }
+        val launch = Robolectric.buildActivity(Activity::class.java).setup()
+
+        observer.onActivityResumed(launch.get())
+        dispatchDraw(launch.get())
+        now = 20_600L                                             // the user comes back 20 s later
+        launch.pause().resume()
+        observer.onActivityResumed(launch.get())
+        dispatchDraw(launch.get())
+        observer.attach(tracker(queue))
+
+        assertEquals(600L, durationOf(queue))
+    }
+
+    @Test fun `a frame drawn after the tracker is attached is reported once, at the time it was drawn`() {
+        val queue = RecordingQueue()
+        var now = 0L
+        val observer = ColdStartFirstFrameObserver { now }
+        observer.attach(tracker(queue))
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+
+        observer.onActivityResumed(activity)
+        now = 450L
+        dispatchDraw(activity)
+        dispatchDraw(activity)
+
+        assertEquals(450L, durationOf(queue))
+    }
+
+    @Test fun `attaching a second tracker after the frame is told about it too (a start that was retried)`() {
+        val first = RecordingQueue()
+        val second = RecordingQueue()
+        val observer = ColdStartFirstFrameObserver { 500L }
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        observer.attach(tracker(first))
+        observer.onActivityResumed(activity)
+        dispatchDraw(activity)
+
+        observer.attach(tracker(second))
+
+        assertEquals(1, first.events.size)
+        assertEquals("the retry's tracker gets the frame that had already been drawn", 500L, durationOf(second))
     }
 }

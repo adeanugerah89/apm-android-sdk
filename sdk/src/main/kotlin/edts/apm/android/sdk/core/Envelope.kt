@@ -14,7 +14,7 @@ import kotlinx.serialization.Serializable
  * The SDK must never hash it client-side. (SEC-06, CONSTITUTION invariant)
  */
 @Serializable
-data class Envelope(
+internal data class Envelope(
     @SerialName("schema_version") val schemaVersion: Int = 1,
     val sdk: SdkInfo,
     val app: AppInfo,
@@ -28,21 +28,21 @@ data class Envelope(
 )
 
 @Serializable
-data class SdkInfo(
+internal data class SdkInfo(
     val name: String,
     val version: String,
     val health: SdkHealthSnapshot
 )
 
 @Serializable
-data class AppInfo(
+internal data class AppInfo(
     val id: String,
     val version: String,
     val build: String
 )
 
 @Serializable
-data class DeviceInfo(
+internal data class DeviceInfo(
     val os: String = "Android",
     @SerialName("os_version") val osVersion: String,
     val model: String,
@@ -52,7 +52,7 @@ data class DeviceInfo(
 
 /** Integrity signals — snapshot once per session (MOB-29/30/31). Heuristics, not security gate. */
 @Serializable
-data class IntegrityInfo(
+internal data class IntegrityInfo(
     @SerialName("is_emulator") val isEmulator: Boolean = false,
     @SerialName("is_rooted") val isRooted: Boolean = false,
     @SerialName("is_dev_mode") val isDevMode: Boolean = false,
@@ -64,7 +64,7 @@ data class IntegrityInfo(
  * Wire values must be lowercase to match iOS. (§2.2)
  */
 @Serializable
-enum class UserIdSource {
+internal enum class UserIdSource {
     @SerialName("host") HOST,
     @SerialName("generated") GENERATED
 }

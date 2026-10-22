@@ -13,7 +13,7 @@ import java.util.TimeZone
  * and minSdk is 24. A new formatter is built per call since SimpleDateFormat is not
  * thread-safe and Clock is a shared singleton.
  */
-object Clock {
+internal object Clock {
     private const val PATTERN = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
 
     fun nowIso8601(): String = iso8601(nowMillis())

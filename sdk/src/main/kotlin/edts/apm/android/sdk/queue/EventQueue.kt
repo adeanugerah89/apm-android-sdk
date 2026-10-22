@@ -10,7 +10,7 @@ import edts.apm.android.sdk.core.Event
  *
  * Thread-safety contract: all implementations must be thread-safe.
  */
-interface EventQueue {
+internal interface EventQueue {
     /**
      * Write a single event to the queue atomically (temp + rename).
      * Must complete before any network operation is attempted. (MOB-04)
@@ -41,13 +41,13 @@ interface EventQueue {
     }
 }
 
-data class QueuedEvent(
+internal data class QueuedEvent(
     val id: String,       // opaque — maps to file path for delete
     val event: Event,
     val sizeBytes: Long
 )
 
-data class QueueStats(
+internal data class QueueStats(
     val eventCount: Int,
     val totalBytes: Long
 )

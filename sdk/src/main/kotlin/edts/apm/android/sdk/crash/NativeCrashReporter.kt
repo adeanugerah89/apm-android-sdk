@@ -36,7 +36,7 @@ import java.util.UUID
  * not in our storage, so the same crash is offered again on every launch until it ages out of the
  * system's history.
  */
-class NativeCrashReporter(
+internal class NativeCrashReporter(
     private val context: Context,
     private val prefs: SharedPreferences,
     private val queue: EventQueue,

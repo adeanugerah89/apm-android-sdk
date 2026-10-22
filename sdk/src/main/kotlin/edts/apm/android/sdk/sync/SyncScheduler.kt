@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
  * (connectivity recovery, background transition) always collapses onto the earliest pending run
  * rather than stacking duplicate work.
  */
-object SyncScheduler {
+internal object SyncScheduler {
     const val UNIQUE_WORK_NAME = "edts_apm_sync"
 
     fun scheduleNext(context: Context, delayMs: Long) {

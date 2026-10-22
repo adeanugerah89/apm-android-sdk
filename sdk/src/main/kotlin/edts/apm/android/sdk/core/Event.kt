@@ -15,7 +15,7 @@ import kotlinx.serialization.json.JsonObject
  * attrs is type-specific (§4). ctx is volatile context that can change within a session.
  */
 @Serializable
-data class Event(
+internal data class Event(
     @SerialName("event_id") val eventId: String,
     val type: EventType,
     @SerialName("ts_client") val tsClient: String,   // ISO-8601 UTC
@@ -54,11 +54,11 @@ data class Event(
 }
 
 /** App and OS identity at a moment in time — see [Event.appVersion]. Any part may be unknown. */
-data class AppStamp(val version: String?, val build: String?, val osVersion: String?)
+internal data class AppStamp(val version: String?, val build: String?, val osVersion: String?)
 
 /** Wire values match iOS exactly — do NOT rename. (§4 type enum) */
 @Serializable
-enum class EventType {
+internal enum class EventType {
     @SerialName("network")          NETWORK,
     @SerialName("network_failure")  NETWORK_FAILURE,
     @SerialName("crash")            CRASH,
@@ -74,7 +74,7 @@ enum class EventType {
  * All fields nullable — if unknown at capture time, omit (don't emit null to wire).
  */
 @Serializable
-data class EventContext(
+internal data class EventContext(
     val connectivity: String? = null,
     val screen: String? = null,
     @SerialName("app_state") val appState: String? = null,

@@ -21,36 +21,42 @@ import java.util.concurrent.atomic.AtomicBoolean
  * promise is identical output across platforms, and a future reader that picks one would otherwise
  * silently see only one platform's cold starts.
  *
- * The clock starts at [processStartUptimeMs] (`android.os.Process.getStartUptimeMillis()`, API 24)
+ * The clock starts at [processStartElapsedMs] (`android.os.Process.getStartElapsedRealtime()`, API 24)
  * rather than at `APM.start()`. Measuring from our own initialization would quietly exclude
  * everything before it — process fork, class loading, other libraries' `Application.onCreate` —
  * which is exactly the part a slow cold start usually lives in.
  *
- * It stops at the first frame actually drawn, reported by [ColdStartFirstFrameObserver]. Both
- * ends are on the same `elapsedRealtime` timebase, so the difference survives clock changes.
+ * It stops at the first frame actually drawn, reported by [ColdStartFirstFrameObserver] **with the
+ * time it was drawn** — which can be long before this tracker exists (A46: `APM.start()` assembles in
+ * the background, and on a slow device the first frame beats it). Both ends are on the
+ * `elapsedRealtime` timebase. It used to start from `getStartUptimeMillis()`, which is the *uptime*
+ * timebase (it stops during deep sleep); subtracting that from `elapsedRealtime()` adds every second the
+ * device has ever slept to every cold start, which on a real phone is hours — past the plausibility cap, so
+ * nothing would ever have been reported.
  *
  * Fires at most once per process ([recorded] latches): a second activity being drawn is not a
  * second cold start.
  */
-class ColdStartTracker(
+internal class ColdStartTracker(
     private val queue: EventQueue,
     private val seqProvider: () -> Long,
     private val contextProvider: () -> EventContext,
-    private val processStartUptimeMs: Long,
+    private val processStartElapsedMs: Long,
     private val isEnabled: () -> Boolean = { true },
     private val elapsedRealtime: () -> Long = SystemClock::elapsedRealtime
 ) {
     private val recorded = AtomicBoolean(false)
 
     /**
-     * Call when the first frame has been drawn. Returns the recorded duration, or null when
-     * nothing was emitted (already recorded, disabled, or the measurement was not believable).
+     * Call when the first frame has been drawn. [frameElapsedRealtimeMs] is when it was drawn, which may be
+     * well before this is called. Returns the recorded duration, or null when nothing was emitted (already
+     * recorded, disabled, or the measurement was not believable).
      */
-    fun onFirstFrame(): Long? {
+    fun onFirstFrame(frameElapsedRealtimeMs: Long = elapsedRealtime()): Long? {
         if (!recorded.compareAndSet(false, true)) return null
         if (!isEnabled()) return null
 
-        val durationMs = elapsedRealtime() - processStartUptimeMs
+        val durationMs = frameElapsedRealtimeMs - processStartElapsedMs
         // A process forked in the background — by a broadcast, a job, a content provider — can sit
         // for minutes before anything is drawn. That number is real but it is not a cold start,
         // and shipping it would poison the p95 with values no user ever waited through.

@@ -10,7 +10,7 @@ import java.io.File
  * specific known package names declared in `<queries>` (AndroidManifest.xml) so they still
  * work under API 30+ package visibility filtering without needing QUERY_ALL_PACKAGES.
  */
-object RootDetector {
+internal object RootDetector {
 
     private val SU_PATHS = listOf(
         "/system/bin/su", "/system/xbin/su", "/sbin/su",

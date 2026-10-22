@@ -18,7 +18,7 @@ import edts.apm.android.sdk.internal.ApmRuntime
  * `Configuration.Provider` — see [edts.apm.android.sdk.internal.ApmRuntime] for why that matters.
  * The remaining parameters stay injectable so tests never touch the process-wide graph.
  */
-class SyncWorker @JvmOverloads constructor(
+internal class SyncWorker @JvmOverloads constructor(
     context: Context,
     params: WorkerParameters,
     private val engineProvider: () -> SyncEngine? = { ApmRuntime.current?.syncEngine },
@@ -84,7 +84,7 @@ class SyncWorker @JvmOverloads constructor(
  * requirement on the host app. Kept because it is the only way a test can drive real WorkManager
  * with an injected engine instead of the process-wide [ApmRuntime].
  */
-class SyncWorkerFactory(
+internal class SyncWorkerFactory(
     private val engineProvider: () -> SyncEngine,
     private val uploadIntervalMs: Long
 ) : WorkerFactory() {

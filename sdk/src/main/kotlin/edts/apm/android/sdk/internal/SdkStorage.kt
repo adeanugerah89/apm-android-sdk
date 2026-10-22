@@ -25,6 +25,13 @@ internal object SdkStorage {
     const val CONFIG_CACHE_NAME = "apm-remote-config.json"
     const val STATE_FILE_NAME = "apm-state.json"
 
+    /**
+     * Where an earlier, xCrash-based native-crash path kept its tombstones, in `filesDir` — which Auto
+     * Backup includes. Nothing in this SDK writes or reads it any more (A9b replaced xCrash with the
+     * platform's own tombstone), so it is only ever a leftover.
+     */
+    const val ABANDONED_NATIVE_CRASH_DIR_NAME = "apm-native-crash"
+
     /** The SharedPreferences file earlier builds used. It sits in `shared_prefs/`, which Auto Backup includes. */
     const val LEGACY_PREFS_NAME = "edts_apm_prefs"
     private const val KEY_STATE_MIGRATED = "apm_state_migrated"
@@ -82,6 +89,21 @@ internal object SdkStorage {
         }
     } catch (e: Throwable) {
         0
+    }
+
+    /**
+     * A47 (SEC-07): deletes the directory an earlier build's xCrash path left in `filesDir`. Its
+     * tombstones hold stack traces and memory maps, nothing reads them, and `bmgr backupnow` showed
+     * Auto Backup including one — data the user's cloud backup holds for no purpose. They cannot be
+     * reported either (no code parses that format any more), so deleting loses nothing. Never touches
+     * [root], so the queue and state are safe. Costs one `exists()` once the directory is gone; never
+     * throws. Returns whether a directory was removed.
+     */
+    fun deleteAbandonedNativeCrashDir(context: Context): Boolean = try {
+        val dir = File(context.filesDir, ABANDONED_NATIVE_CRASH_DIR_NAME)
+        dir.exists() && dir.deleteRecursively()
+    } catch (e: Throwable) {
+        false
     }
 
     private fun moveDirectory(from: File, to: File): Int {

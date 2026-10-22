@@ -25,7 +25,7 @@ import kotlin.concurrent.withLock
  * JSON, so they are written once here and the format is decided by whichever [EventCodec] is
  * supplied. See [EncryptedEventCodec].
  */
-class DiskEventQueue(
+internal class DiskEventQueue(
     private val queueDir: File,
     private val health: SdkHealth,
     private val codec: EventCodec = JsonEventCodec(),

@@ -40,7 +40,7 @@ import javax.crypto.spec.GCMParameterSpec
  * GCM is authenticated: a tampered or truncated file fails [decrypt] rather than decoding into
  * something that looks like a valid event.
  */
-class AesGcmQueueCipher(private val key: SecretKey) : QueueCipher {
+internal class AesGcmQueueCipher(private val key: SecretKey) : QueueCipher {
 
     override fun encrypt(plaintext: ByteArray): ByteArray? {
         return try {

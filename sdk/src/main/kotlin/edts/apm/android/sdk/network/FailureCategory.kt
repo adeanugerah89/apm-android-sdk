@@ -14,7 +14,7 @@ import javax.net.ssl.SSLPeerUnverifiedException
  * Wire values IDENTICAL to iOS. Do not rename @SerialName values.
  */
 @Serializable
-enum class FailureCategory {
+internal enum class FailureCategory {
     @SerialName("ssl_certificate")      SSL_CERTIFICATE,
     @SerialName("ssl_pinning_rejected") SSL_PINNING_REJECTED,
     @SerialName("tls_handshake")        TLS_HANDSHAKE,
@@ -43,7 +43,7 @@ enum class FailureCategory {
  * - UnknownHostException: DNS failure
  * - "Canceled" message: OkHttp cancelled by application → cancelled
  */
-object FailureCategoryMapper {
+internal object FailureCategoryMapper {
 
     /** Prefix of the message OkHttp's `CertificatePinner` puts on a pin mismatch. */
     private const val PINNING_FAILURE_PREFIX = "Certificate pinning failure!"

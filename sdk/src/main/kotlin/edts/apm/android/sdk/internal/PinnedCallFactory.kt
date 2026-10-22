@@ -23,7 +23,7 @@ import okhttp3.Request
  * and still cannot speak cleartext. The kill switch relaxes pinning, never transport security;
  * SEC-12 holds either way.
  */
-class PinnedCallFactory(
+internal class PinnedCallFactory(
     private val pinned: Call.Factory,
     private val unpinned: Call.Factory,
     private val isPinningEnabled: () -> Boolean

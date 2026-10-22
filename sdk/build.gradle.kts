@@ -99,6 +99,13 @@ android {
     }
 }
 
+// A43 (MOB-24): the supported API is exactly what `consumer-rules.pro` keeps (RELEASING.md). Strict explicit-API
+// mode makes the compiler hold that line — a declaration is public only when someone wrote `public` on it, so
+// widening the API takes a visible diff instead of a forgotten modifier. Applies to main sources only.
+kotlin {
+    explicitApi()
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.serialization.json)

@@ -10,7 +10,7 @@ import android.provider.Settings
  * for why (a QA build without a debugger, vs. a developer actively debugging, mean different
  * things when filtering non-real sessions).
  */
-object DevModeDetector {
+internal object DevModeDetector {
 
     /** Non-production environment: Developer Options or ADB enabled. */
     fun isDevModeEnabled(context: Context): Boolean = try {

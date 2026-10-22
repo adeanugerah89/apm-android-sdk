@@ -9,7 +9,7 @@ import java.util.TimeZone
  * Builds the static device and app context captured once per session.
  * All fields produce wire-safe strings with no PII (no IMEI, no serial).
  */
-object DeviceContextBuilder {
+internal object DeviceContextBuilder {
 
     /** The one place the OS version string comes from, so capture-time and upload-time cannot disagree. */
     fun osVersion(): String = Build.VERSION.RELEASE

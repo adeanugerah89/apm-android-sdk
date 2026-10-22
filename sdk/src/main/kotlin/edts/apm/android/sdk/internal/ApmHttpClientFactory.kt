@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  * Timeouts are finite and short-ish on purpose: telemetry is not worth holding a socket open for
  * minutes, and a hung upload delays the queue drain behind it.
  */
-object ApmHttpClientFactory {
+internal object ApmHttpClientFactory {
 
     private const val CONNECT_TIMEOUT_S = 10L
     private const val READ_TIMEOUT_S = 20L

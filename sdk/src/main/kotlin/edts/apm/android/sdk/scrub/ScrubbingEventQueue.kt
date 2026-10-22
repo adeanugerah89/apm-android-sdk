@@ -11,7 +11,7 @@ import edts.apm.android.sdk.queue.QueuedEvent
  * around [edts.apm.android.sdk.queue.DiskEventQueue] so nothing reaches disk unscrubbed,
  * the same wrapping pattern the interface docs reserve for at-rest encryption (A14).
  */
-class ScrubbingEventQueue(private val delegate: EventQueue) : EventQueue {
+internal class ScrubbingEventQueue(private val delegate: EventQueue) : EventQueue {
 
     override fun enqueue(event: Event): Boolean = delegate.enqueue(Scrubber.scrubEvent(event))
 
