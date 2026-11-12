@@ -83,6 +83,13 @@ class MainActivity : Activity() {
             toast("user_id_source is now host")
         }
 
+        // Checklist 21 — logout. Events captured after this must go out as user_id_source
+        // "generated", not under the user who was signed in before (A39/A41).
+        root.button("clearUser (item 21)") {
+            APM.clearUser()
+            toast("user_id_source is back to generated")
+        }
+
         // Exercises the host-attached EventListener (MOB-01/02) — integration step 2.
         root.button("HTTP request (network capture)") { triggerHttpRequest() }
 

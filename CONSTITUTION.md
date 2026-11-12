@@ -1460,3 +1460,39 @@ implementation type without a warning. Now:
   classes in the AAR) — required anyway for WorkManager to instantiate `SyncWorker` reflectively — so Java callers and
   reflection can still reach them. The promise is *unsupported*, not *unreachable*.
 
+
+### 2026-11-09 · A26: the upload body declares its length
+
+`IngestUploader.gzip()` used to stream through `GzipSink` inside `writeTo()` with no `contentLength()`, so OkHttp sent
+`Transfer-Encoding: chunked`. It now compresses once into a buffer and sends a fixed-length body.
+
+- **Why now, when A26 was parked:** a size known before sending lets proxies/WAFs that mishandle chunked bodies pass the
+  request, saves chunk framing, and stops a connection retry from re-compressing. It was never a backend bug — `01` §7
+  requires the ingest endpoint to accept both forms, so this change cannot break either backend.
+- **The declared length is the compressed size**, which is the figure `01` §7 caps at 1 MB. Memory cost: the compressed
+  payload is held for the duration of one upload (bounded by the batch size), on the sync worker thread only.
+- **Not done:** deciding `413` locally from the now-known size. The sync engine still relies on the server's `413`
+  (halve the batch and retry); making that local would change `SyncEngine` behaviour and is its own decision.
+
+
+### 2026-11-12 · A29/A39/A40 closed on device evidence; the A40 heuristic is observed, not assumed
+
+No SDK code changed. The three rows were open only because their device observations (checklist 19, 20, 21) were
+half done; the code, tests and decisions stand as recorded on 2026-10-02/06.
+
+- **A40's recorded assumption held.** An install created by `bmgr restore` onto a freshly installed build, before
+  its first launch, had `firstInstallTime == lastUpdateTime`; the SDK treated it as a fresh install, issued a new
+  `install_id`, imported nothing and emptied the restored prefs file. The archive used was real: made by
+  `bmgr backupnow` from an app whose `shared_prefs` held an `install_id`, and it contained no `no_backup/` entry.
+- **What the run does not prove:** it used the local transport and `bmgr restore`, not Google's restore-at-install.
+  The data path is the same; the trigger is not. If Play's restore ever produces a larger gap between the two
+  timestamps, the safe-side failure modes recorded on 2026-10-02 still apply (a restored id carried over = status
+  quo before A40).
+- **A39/A41 on the device:** `generated` → `host` → `generated` across `setUser` / `clearUser`, so nothing captured
+  after logout is attributed to the earlier user. `clearUser (item 21)` was added to the verification app for this.
+- **A26 observed on the wire in the same run:** the ingest server recorded no `Transfer-Encoding` on any upload.
+- **Observation, not acted on:** after `pm clear` the app re-reported an old native tombstone from the system's
+  `ApplicationExitInfo` history (4 crash events), because the dedup marker lived in the cleared state file. A real
+  reinstall removes that history with the package, so this is a test-procedure effect; it is the same lost-marker
+  window that A52 would absorb with a deterministic `event_id`.
+

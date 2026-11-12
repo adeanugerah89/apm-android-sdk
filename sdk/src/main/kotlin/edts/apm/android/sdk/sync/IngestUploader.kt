@@ -7,7 +7,8 @@ import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Call
 import okhttp3.Request
-import okio.BufferedSink
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.Buffer
 import okio.GzipSink
 import okio.buffer
 import java.io.IOException
@@ -75,12 +76,14 @@ internal class IngestUploader(
         }
     }
 
-    private fun gzip(payload: ByteArray) = object : okhttp3.RequestBody() {
-        override fun contentType() = jsonMediaType
-        override fun writeTo(sink: BufferedSink) {
-            val gzipSink = GzipSink(sink).buffer()
-            gzipSink.write(payload)
-            gzipSink.close()
-        }
+    /**
+     * Compresses once, up front, so the request carries a `Content-Length` (A26) instead of being
+     * streamed chunked: intermediaries and WAFs can judge size before reading, and an OkHttp
+     * connection retry re-sends these bytes rather than re-compressing.
+     */
+    private fun gzip(payload: ByteArray): okhttp3.RequestBody {
+        val compressed = Buffer()
+        GzipSink(compressed).buffer().use { it.write(payload) }
+        return compressed.readByteString().toRequestBody(jsonMediaType)
     }
 }

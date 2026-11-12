@@ -64,6 +64,30 @@ class IngestUploaderTest {
         assertTrue(decompressed.contains("\"install_id\":\"install-1\""))
     }
 
+    @Test fun `declares the compressed size up front instead of streaming chunked`() {
+        server.enqueue(MockResponse().setResponseCode(202))
+
+        uploader().upload(minimalEnvelope())
+
+        val recorded = server.takeRequest()
+        assertNull("A26: body must not be chunked", recorded.getHeader("Transfer-Encoding"))
+        assertEquals(recorded.bodySize, recorded.getHeader("Content-Length")?.toLong())
+    }
+
+    @Test fun `a 413 decision can be made from the declared length alone`() {
+        // The reason A26 exists: an intermediary that sees Content-Length can refuse an oversized
+        // body before reading it. The declared length must therefore be the *compressed* length,
+        // because that is what `01` §7 caps at 1 MB.
+        server.enqueue(MockResponse().setResponseCode(202))
+
+        uploader().upload(minimalEnvelope())
+
+        val recorded = server.takeRequest()
+        val declared = recorded.getHeader("Content-Length")!!.toLong()
+        val raw = GZIPInputStream(recorded.body.inputStream()).readBytes()
+        assertTrue("declared length is the gzip size, not the JSON size", declared < raw.size)
+    }
+
     @Test fun `parses a 202 as success`() {
         server.enqueue(MockResponse().setResponseCode(202))
         val result = uploader().upload(minimalEnvelope()) as UploadResult.HttpResponse
