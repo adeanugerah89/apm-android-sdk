@@ -1527,3 +1527,22 @@ half done; the code, tests and decisions stand as recorded on 2026-10-02/06.
 - **Test-environment note:** with Proxyman's system proxy (127.0.0.1:9090) on, the JBR's default `ProxySelector` routes the
   test JVM through it and `NetworkEventAttrsTest` "a DNS failure…" fails ("a reserved name must not resolve") — unrelated
   to the SDK. `JAVA_TOOL_OPTIONS=-Dhttp.nonProxyHosts=*` bypasses it for a run without touching the system setting.
+
+### 2026-11-27 · A53: connectivity breadcrumbs follow the MOB-12 change rules, with Android's own handling of a network switch
+- **Decision:** `ConnectivityBreadcrumbSource` writes a breadcrumb only when the state a person would describe changes
+  (reachable or not, or the interface), folds changes within 5 s into one (first at once, rest as the state they settle in),
+  and treats the first report at start as no change when online. Names and rules are `02` MOB-12 and iOS 0.0.16's
+  `AutomaticBreadcrumbSource`; `BreadcrumbRingBuffer` holds at most half its capacity of `network` crumbs.
+- **Why:** the old code wrote `connectivity_restored` on every `onAvailable` (including the one fired at registration) and
+  `connectivity_lost` on every `onLost`, so a flapping network pushed everything else out of the 100-entry buffer.
+- **Android-only handling:** (1) `ConnectivityManager` announces the new default network *before* it loses the old one, so an
+  `onLost` for a network that is no longer the current one is ignored, not "offline"; (2) `onCapabilitiesChanged` for a
+  non-default network is ignored; (3) when capabilities are not known yet at `onAvailable` the interface the trail already has
+  is kept instead of guessing `other`; (4) there is no callback for "already offline", so `start()` reads `activeNetwork`
+  to make the first report (offline at launch → one `connectivity_lost`).
+- **Transport mapping (decided here, mirrors iOS precedence):** wifi → `wifi`, else cellular → `cellular`, else ethernet →
+  `wired`, else `other` (VPN alone, Bluetooth, USB, Wi-Fi Aware).
+- **"Half of a crash report's quota":** iOS needs a separate rule because KSCrash truncates its user info at 1 KB. Android
+  sends the whole ring buffer, so the ring buffer's own cap is the whole rule here.
+- **Not decided here:** whether `ConnectivityWatcher` (the sync trigger, A5) should share the callback; it stays separate.
+

@@ -115,7 +115,9 @@ string.
 `timestamp`, `category`, `level`, `message`. Kept in memory only (last 100), attached to `error` and
 `crash` events. **Never written to disk on its own.**
 
-Automatic breadcrumbs: screen changes, foreground/background, connectivity changes. Manual ones come
+Automatic breadcrumbs: screen changes, foreground/background, connectivity changes (only when the state actually changes —
+`connectivity_lost`, `connectivity_restored`, `connectivity_changed_to_<wifi|cellular|wired|other>` — and at most half of the
+buffer). Manual ones come
 from `APM.breadcrumb()` and are developer-written text — scrubbed, but the same caution as `message`
 applies.
 

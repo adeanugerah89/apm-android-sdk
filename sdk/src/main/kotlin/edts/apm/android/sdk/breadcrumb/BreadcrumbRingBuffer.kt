@@ -22,6 +22,12 @@ internal class BreadcrumbRingBuffer(private val clock: () -> Long = System::curr
 
     fun record(message: String, category: BreadcrumbCategory, level: BreadcrumbLevel = BreadcrumbLevel.INFO) {
         lock.withLock {
+            // MOB-12 (0.0.16): `network` is written by the connectivity observer without the host asking, so it
+            // must never crowd out the screens and actions the host records on purpose. At the cap the OLDEST
+            // network entry makes room, so the newest connectivity change always survives.
+            if (category == BreadcrumbCategory.NETWORK && entries.count { it.category == category } >= NETWORK_LIMIT) {
+                entries.removeAt(entries.indexOfFirst { it.category == category })
+            }
             if (entries.size >= CAPACITY) entries.removeFirst()
             entries.addLast(
                 BreadcrumbEntry(
@@ -41,6 +47,13 @@ internal class BreadcrumbRingBuffer(private val clock: () -> Long = System::curr
 
     companion object {
         const val CAPACITY = 100
+
+        /**
+         * Most `network` entries the buffer holds at once: half of it (MOB-12, 0.0.16). Android sends the whole
+         * buffer with a crash (`breadcrumbs_dropped` is always 0), so this one cap is also what keeps connectivity
+         * to at most half of a crash report's breadcrumbs.
+         */
+        const val NETWORK_LIMIT = CAPACITY / 2
     }
 }
 
