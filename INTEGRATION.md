@@ -94,6 +94,13 @@ The listener excludes your ingest host from capture, so the SDK cannot record it
 
 ## 4. Upload symbols from your CI — required for readable crashes
 
+> **Status (2026-11): the upload target is not settled.** `symbol-upload.gradle.kts` implements the
+> `mapping.txt` upload that `01` §8 specifies, but the backend's current symbol endpoint
+> (`POST /v1/apps/{id}/symbols`, `X-APM-Upload-Token`) accepts only an iOS Mach-O `__DWARF` file and
+> rejects anything else. Android symbolication is a separate, unstarted piece of work (`FEATURES.md` A50).
+> Until it lands, do not provision a symbols endpoint or CI token for this step; keep the `mapping.txt`
+> from each release build so it can be uploaded later.
+
 A release build is obfuscated by R8, so a crash arrives as `a.b.c(SourceFile:1)` unless the
 `mapping.txt` from *your* build is uploaded. The SDK is shrunk as part of your app, so this is your
 mapping file, not the APM team's.
@@ -128,6 +135,10 @@ APM.breadcrumb("tapped checkout", BreadcrumbCategory.USER_ACTION)
 
 `BreadcrumbCategory`: `NAVIGATION`, `USER_ACTION`, `NETWORK`, `LIFECYCLE`, `STATE`, `LOG`.
 `BreadcrumbLevel`: `DEBUG`, `INFO`, `WARNING`, `ERROR` (defaults to `INFO`).
+
+**`setUser` ignores an empty or whitespace-only string** (it is not an identity; the previous user stays). Any
+other value is taken as given — including placeholders like `"0"` or `"guest"`, which would put every
+signed-out visitor under one user: before login do not call `setUser`, and on logout call `clearUser()`.
 
 **`setUser` survives a restart** — call it when the user signs in, as you would on iOS; you do **not** need to
 call it again on every launch (calling it again with the same value is harmless and changes nothing). **Call

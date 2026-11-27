@@ -62,8 +62,11 @@ Satu request berisi satu envelope. Konteks statis diletakkan di envelope (tidak 
 
 ### 2.2 `user_id_source` — kenapa perlu dibedakan
 
-Nilai `user_id` selalu terisi: bila app host tidak memanggil `setUser`, SDK memakai ID acak
-yang stabil per install. Dari sisi backend keduanya terlihat identik — sama-sama string
+Nilai `user_id` terisi: bila app host tidak memanggil `setUser`, SDK memakai ID acak
+yang stabil per install. **Satu pengecualian (SDK 0.0.16):** envelope yang berisi crash
+dari sesi yang user-nya tidak bisa dipulihkan (laporan crash dari SDK lama, atau data sesi
+rusak) mengosongkan `user_id` dan `user_id_source` — SDK tidak mengisinya dengan user
+launch berikutnya, karena itu bisa orang lain. Backend menyimpan `user_ref` null. Dari sisi backend keduanya terlihat identik — sama-sama string
 yang di-hash menjadi `user_ref`.
 
 Padahal artinya jauh berbeda. `user_ref` dari identifier app host **dapat dicocokkan**
@@ -210,7 +213,16 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 
 > **`is_fatal=false` dikecualikan dari crash-free rate — prinsip yang sama dengan §4.7, diperluas.** Alasan `termination` bukan `crash` (§4.7: "Menghitungnya sebagai crash membuat crash-free rate buruk secara palsu") berlaku kata-demi-kata untuk `crash_type` apa pun di bawah `type: "crash"` yang `is_fatal`-nya `false` — misalnya `hang` yang pulih sendiri tanpa mematikan proses. Backend **wajib** mengecualikan baris `is_fatal=false` dari penghitung `crash_sessions`/`crash_users` (metrik crash-free), bukan hanya baris `type='termination'`. Baris `type='crash'` yang tidak punya `is_fatal` sama sekali (event lama, sebelum field ini ada) dihitung **sebagai fatal** — default yang menganggap tak-fatal akan diam-diam membuang crash sungguhan dari metrik, kegagalan yang jauh lebih buruk daripada memasukkan satu hang yang semestinya dikecualikan. Ditemukan 2026-10-01 dari data pilot nyata: KSCrash Watchdog yang tidak dijeda saat app di-background menghasilkan `crash_type: hang, is_fatal: false` persis pada siklus background/foreground, sebelum celah ini ditutup (lihat `FEATURES.md` APMKit, parked item, untuk perbaikan di sisi SDK yang masih tertunda).
 >
-> **`hang_resolution: "unresolved"` TIDAK berarti "tidak diketahui" — artinya hang ini tidak pernah terkonfirmasi pulih sebelum prosesnya mati.** KSCrash menandai laporan semacam ini `is_fatal: true` (lewat `WatchdogStitch.m`, di sisi SDK) karena ia tidak bisa membuktikan sebaliknya — proses itu sudah tidak ada untuk dimintai konfirmasi. Tapi "tidak terbukti pulih" bukan sinonim dari "crash sungguhan": kematian proses yang memicu kondisi ini bisa jadi crash nyata, atau bisa jadi semata app di-background lalu di-kill OS (jetsam/memory pressure) — kondisi yang sama sekali bukan crash yang dialami pengguna. **Apakah baris `hang_resolution: "unresolved"` tetap dihitung dalam `crash_free_sessions`/`crash_free_users`, atau dipisah ke metrik tersendiri, adalah keputusan produk yang BELUM diambil** — lihat `FEATURES.md` APMKit, item 18, untuk pertanyaan itu apa adanya. Item 18 adalah sumbernya; paragraf ini hanya merujuk ke nomor itu, bukan sebaliknya. **`hang_start_state`/`hang_start_perceptible` (di atas) adalah fakta yang keputusan itu kemungkinan besar akan dipakai** — lihat paragraf berikutnya untuk alasannya; `readapi.py` dan `overview.go` **belum membaca field ini** sama sekali hari ini (TAHAP 2 FEATURES.md item 18: SDK mengirim faktanya, server belum memutuskan apa-apa dari situ).
+> **Definisi crash tunggal, dan hang dihitung terpisah (2026-10-22).** `type: "crash"` hanyalah saluran di kabel — hang ikut lewat situ — sedangkan apa yang sebenarnya dialami ditentukan `attrs.crash_type`. Satu definisi, dipakai semua penghitung (crash-free sessions/users, daftar user, outcome sesi):
+>
+> - **crash** = `type = 'crash'` **dan** `crash_type <> 'hang'` **dan** `is_fatal` bukan `false` eksplisit (`crash_type` yang tidak ada, atau `is_fatal` yang tidak ada/rusak, tetap crash — aturan default-fatal di atas);
+> - **hang** = `type = 'crash'` dan `crash_type = 'hang'`, baik `recovered` maupun `unresolved`. Hang **dihitung terpisah** (`hangs`), tidak pernah masuk `crashes`/`crash_sessions`/crash-free.
+>
+> Sebelum ini tiga penghitung menulis `type = 'crash'` sendiri-sendiri: daftar user menampilkan "Crashes 3" untuk user yang hanya punya tiga `MainThreadHang`, dan outcome sesi menjadi `crashed` karena hang. `RecrashedCrash` (`crash_type: exception`, `is_fatal: true`) tetap crash. Pengelompokan issue tidak berubah: hang tetap issue (v1) bertipe `crash`. Sumber keputusan, audit semua query, dan paritas dengan pilot: `apm-backend/CONSTITUTION.md`, entri 2026-10-22. Implementasi: apm-backend `da16e39` (`internal/readapi/crash_definition.go`), apm-backoffice `fb0b0ac`.
+>
+> **Hanya apm-backend yang memakai definisi ini.** Pilot (`readapi.py`) tidak melihat `crash_type`: ia masih menghitung hang `unresolved` dan sesi yang hanya berisi hang sebagai crash. Itu satu-satunya perbedaan yang disengaja, dan dikunci di kedua sisi oleh tes paritas (bukan disembunyikan di allowlist).
+>
+> **`hang_resolution: "unresolved"` TIDAK berarti "tidak diketahui" — artinya hang ini tidak pernah terkonfirmasi pulih sebelum prosesnya mati.** KSCrash menandai laporan semacam ini `is_fatal: true` (lewat `WatchdogStitch.m`, di sisi SDK) karena ia tidak bisa membuktikan sebaliknya — proses itu sudah tidak ada untuk dimintai konfirmasi. Tapi "tidak terbukti pulih" bukan sinonim dari "crash sungguhan": kematian proses yang memicu kondisi ini bisa jadi crash nyata, atau bisa jadi semata app di-background lalu di-kill OS (jetsam/memory pressure) — kondisi yang sama sekali bukan crash yang dialami pengguna. **Keputusan SEMENTARA (2026-10-22, menunggu persetujuan item 18): hang `unresolved` TIDAK dihitung sebagai crash maupun sebagai kegagalan lain di mana pun** — ia hanya tampil sebagai hang (`hangs`). Konsekuensinya diterima secara sadar: crash-free sessions bisa terbaca lebih tinggi daripada pilot untuk app yang punya hang `unresolved`, sebesar persis sesi-sesi itu. **Usulan untuk item 18: metrik freeze terpisah** (rasio sesi dengan hang `unresolved`, ditampilkan di samping crash-free, tidak pernah di dalamnya). Pertanyaan produknya apa adanya tetap di `FEATURES.md` APMKit, item 18; item 18 adalah sumbernya, paragraf ini hanya merujuk ke nomor itu, bukan sebaliknya. **`hang_start_state`/`hang_start_perceptible` (di atas) adalah fakta yang keputusan itu kemungkinan besar akan dipakai** — lihat paragraf berikutnya untuk alasannya; `readapi.py` dan `overview.go` **belum membaca `hang_start_state`/`hang_start_perceptible`** sama sekali hari ini (yang dibaca overview.go hanya `crash_type`, untuk definisi crash di atas) (TAHAP 2 FEATURES.md item 18: SDK mengirim faktanya, server belum memutuskan apa-apa dari situ).
 >
 > **Arti "start": saat watchdog mendeteksi, bukan saat main thread sungguh macet.** KSCrash mencatat `hang_start_state`'s timestamp dari ping terjadwal terakhir (dekat dengan saat macetnya sungguh mulai), tapi transition-state-nya sendiri diambil pada TICK DETEKSI pertama (`watchdogTimerFired`, bisa tertunda hingga ambang 250ms, atau — pada skenario app disuspend lalu di-resume sebelum main thread sempat merespons ping — bisa jauh lebih lambat karena jam dinding terus berjalan selama suspend). Walau begitu, `hang_start_state` tetap field yang andal untuk "apakah pengguna pernah melihat app ini macet": `_transitionState` di KSCrash hanya berubah lewat notifikasi `UIApplication*` yang dikirim SYNCHRONOUS di main thread — kalau main thread benar-benar macet, notifikasi itu TIDAK BISA terkirim, jadi state-nya membeku di nilai terakhir yang sah sebelum macet. Hang yang dimulai `active` (pengguna melihatnya) tetap tercatat `active` walau app lalu dibackground paksa sambil masih macet; hang yang murni terjadi di background (termasuk artefak jam dari skenario suspend/resume di atas, karena notifikasi "masuk background" sudah terkirim sebelum suspend fisik terjadi) tercatat `background`. **Konsekuensinya: untuk satu hang yang sama, `hang_end_state` dalam PRAKTIK sama dengan `hang_start_state`** — karena state hanya bisa berubah lewat notifikasi main-thread, dan main thread yang sedang macet itulah yang seharusnya menjalankan notifikasi tersebut. **Ini TIDAK dijamin secara formal**: tidak ada pembuktian di sini yang menutup semua kasus, dan urutan antara notifikasi `WillEnterForeground` (dikirim main thread saat resume) dengan tick deteksi watchdog sendiri tidak disinkronkan oleh kode ini — ada celah (race), bukan kontradiksi atas mekanisme di atas, tapi juga bukan sesuatu yang dikendalikan SDK ini. `hang_end_state` tetap dikirim apa adanya (SDK tidak menyimpulkan ini, server yang nanti boleh), tapi jangan berharap ia membawa informasi baru di atas `hang_start_state`, dan jangan memperlakukan keduanya sebagai dijamin identik secara konstruksi.
 
@@ -559,12 +571,44 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 | `GET /v1/issues/{id}/breadcrumbs` | Timeline breadcrumb untuk sample event |
 | `GET /v1/apps/{id}/network` | Agregasi network per host & kategori. Dengan `&host=…&failure_category=…` mengembalikan blok `drilldown` — lihat catatan di bawah. |
 | `POST /v1/apps/{id}/users/resolve` | Menerima identifier mentah (mis. nomor telepon/email), meng-hash-nya dengan `server_key`, mengembalikan `user_ref`. **Input tidak disimpan.** Ini yang membuat "cari user via nomor HP" tetap bisa tanpa menyimpan nomornya. |
-| `GET /v1/apps/{id}/users/{user_ref}` | Ringkasan user + timeline sesi (layar User Lookup). Tiap sesi membawa `timeline` (dari event tersimpan) dan `breadcrumbs` — lihat catatan di bawah. |
+| `GET /v1/apps/{id}/users` | Daftar user dalam satu jendela, satu halaman per permintaan (layar User Lookup, di bawah kotak cari) — lihat catatan di bawah. **Hanya ada di apm-backend**, pilot tidak punya. |
+| `GET /v1/apps/{id}/users/{user_ref}` | Ringkasan user + timeline sesi (layar User Lookup). Tiap sesi membawa `outcome` (`crashed` \| `hang` \| `errors` \| `clean`), `crashes`, `hangs` (field `hangs` hanya dari apm-backend), `timeline` (dari event tersimpan) dan `breadcrumbs` — lihat catatan di bawah. |
+| `GET /v1/apps/{id}/issues/{issue_id}/users` | User yang terdampak satu issue dalam satu jendela, satu halaman per permintaan (daftar di balik angka `users_affected` pada detail issue). Parameter `days`, `limit`, `cursor`. **Hanya ada di apm-backend**, pilot tidak punya — lihat catatan di bawah. |
 | `GET /v1/apps/{id}/integration` | Data peringatan integrasi (`04` §3.8): `user_id_source`, `sdk_health`, versi SDK terpasang vs terbaru, dan status symbolication. Setiap blok membawa `available` — bila `false`, kondisi itu **belum bisa dinyatakan** dan Frontend tidak boleh menampilkannya sebagai "aman". |
 | `PATCH /v1/issues/{id}` | Ubah status (triaged / resolved / ignored) |
 | `GET/POST /v1/apps/{id}/alerts` | Konfigurasi alert |
 
 > **Filter device-integrity berlaku lintas endpoint.** Endpoint `overview`, `issues`, dan `network` menerima parameter filter `is_emulator`, `is_rooted`, `is_dev_mode` — termasuk opsi "kecualikan sesi non-real (emulator/debug)" untuk metrik headline (FE-22).
+
+> **`GET /v1/apps/{id}/users` — daftar user (apm-backend, 2026-10-21; `hangs` sejak 2026-10-22).** Parameter: `days` (default 7), `sort` = `crashes` \| `last_seen` \| `sessions` (menurun; kunci kedua `user_ref`), `real_users_only` (default `true`, sama dengan halaman lain), `limit` (default 25, maksimum 100) dan `cursor` (buram — pakai `next_cursor` dari respons sebelumnya apa adanya; cursor milik `sort` lain ditolak 400). Tidak pernah mengembalikan semua user sekaligus. Event tanpa `user_ref` bukan user dan tidak terdaftar. Tiap entri:
+>
+> | Field | Arti |
+> |---|---|
+> | `user_ref`, `sessions`, `first_seen`, `last_seen` | `COUNT(DISTINCT session_id)` dan rentang `ts_server` event user itu dalam jendela |
+> | `crash_sessions`, `crashes` | sesi dan event **crash** menurut definisi tunggal di §4.3 — **tanpa hang** |
+> | `hangs` | event **hang** (`crash_type: hang`, recovered atau unresolved), dihitung terpisah; user yang hanya punya hang tampil `crashes: 0`, `hangs: N` |
+> | `network_failures` | `COUNT` event `network_failure` |
+> | `device`, `app_version`, `is_dev_mode` | dari event TERBARU user itu dalam jendela (`null` bila event itu tidak membawanya) |
+>
+> Respons: `app_id`, `window_days`, `sort`, `real_users_only`, `limit`, `users`, `has_more`, `next_cursor`.
+>
+> **Outcome sesi pada `GET /v1/apps/{id}/users/{user_ref}`.** `crashed` bila ada ≥1 crash; bila tidak, `hang` bila ada ≥1 hang; bila tidak, `errors` bila ada error atau `network_failure`; selain itu `clean`. **Urutan: crashed > hang > errors > clean.** Sesi yang hanya berisi hang BUKAN `crashed` (pilot menyebutnya `crashed` — perbedaan yang disengaja, lihat §4.3). Breadcrumb sesi diambil dari event `crash`/`error` terakhirnya, jadi sesi `hang` membawa breadcrumb bila event hang-nya membawanya (§4.5.1).
+>
+> **`GET /v1/apps/{id}/issues/{issue_id}/users` — user yang terdampak satu issue (apm-backend, 2026-10-22).** Menjelaskan angka `users_affected` pada detail issue: daftar ini dibangun dari event yang SAMA dengan cara yang sama, jadi `total_users` selalu sama dengan `users_affected` untuk issue, jendela, dan mode grouping yang sama. Parameter: `days` (default **30**, 1..retensi — sama dengan detail issue), `limit` (default 25, maksimum 100) dan `cursor` (buram — pakai `next_cursor` dari respons sebelumnya apa adanya; cursor yang rusak atau milik urutan lain ditolak 400; `days`/`limit` di luar rentang juga 400). Urutan: `last_seen` menurun, kunci kedua `user_ref` menaik. Tidak pernah mengembalikan semua user sekaligus. Tiap entri:
+>
+> | Field | Arti |
+> |---|---|
+> | `user_ref` | User yang punya ≥1 event issue ini dalam jendela |
+> | `events` | Jumlah event issue ini milik user itu dalam jendela |
+> | `first_seen`, `last_seen` | `ts_server` event pertama dan terakhir user itu pada issue ini (bukan pada seluruh app) |
+> | `device` | Model perangkat dari event TERBARU user itu pada issue ini **yang menyebut model**; `null` bila tidak satu pun menyebutnya |
+>
+> Respons: `app_id`, `issue_id`, `window_days`, `limit`, `total_users`, `users`, `has_more`, `next_cursor`.
+>
+> - **Mengikuti saklar grouping.** Issue dikenali dengan fungsi yang sama dengan daftar issue dan detail, dalam mode `APM_READ_GROUPING_V2` pada permintaan itu (lihat §6.1). Id issue v2 tidak dikenal saat saklar mati, dan id v1 yang eventnya sudah pindah tidak dikenal saat saklar menyala: keduanya menjawab **`404 {"error":"not_found"}`**, seperti issue yang memang tidak ada. Endpoint ini tidak menjawab `issue_moved`.
+> - **Tidak membaca `real_users_only`** (dan filter device-integrity lain), sama seperti detail issue: angka yang dijelaskannya tidak difilter, jadi daftarnya pun tidak.
+> - **Event tanpa `user_ref`** dihitung untuk issue tetapi bukan user mana pun, persis seperti `users_affected` — mereka tidak muncul di daftar dan tidak masuk `total_users`.
+> - **Hanya ada di apm-backend.** Pilot (`apm-ingest/readapi.py`) tidak punya endpoint ini dan tidak ada oracle paritas; kebenarannya dijaga test yang menyamakan `total_users` dengan `users_affected`.
 
 > **`sdk_versions` per entri — field tambahan (feat-016 follow-up).** Tiap entri array `sdk_versions` pada `GET /v1/apps/{id}/integration` membawa, selain `sdk_name`/`version`/`sessions`/`latest_known`/`is_outdated`:
 >
@@ -579,7 +623,7 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 >
 > | Hasil sesi | `breadcrumbs` | `breadcrumbs_status` | `timeline` |
 > |---|---|---|---|
-> | `crashed` / `errors` | Terisi — jejak lengkap sebelum kejadian | `ok` | Terisi |
+> | `crashed` / `hang` / `errors` | Terisi — jejak lengkap sebelum kejadian | `ok` | Terisi |
 > | `clean` | **Kosong** — tidak pernah dikirim | `ok` | Terisi |
 > | payload gagal di-parse | **Kosong** — isinya tidak terbaca | `corrupt` | Terisi |
 >

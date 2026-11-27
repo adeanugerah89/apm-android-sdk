@@ -156,6 +156,21 @@ Also run the device suite; several defects in this SDK were invisible to the JVM
 ./gradlew :sdk:connectedDebugAndroidTest    # needs a device or emulator
 ```
 
+### After publishing — tell the backend what the latest version is
+
+The backoffice's "SDK version outdated" warning (`04` §3.8) compares each app's `sdk.version` with a
+hand-kept map of the latest release per SDK. There is no shared source for it, so it is a step of the
+release, the same as iOS's (`APMKit/VERSIONING.md`):
+
+1. `apm-backend` — `latestSDKVersions["apm-android-sdk"]` in `internal/readapi/integration.go`.
+2. `apm-ingest` — `LATEST_SDK_VERSIONS["apm-android-sdk"]` in `readapi.py` (the frozen parity oracle,
+   which only takes changes like this one).
+
+Set both to the `apmSdkVersion` in [`gradle.properties`](gradle.properties), **after** the artifact is
+published. Skipping it is silent: every app on the new release is reported as outdated, or, if the map was
+never set, no Android app can ever be. `apm-backend`'s `./verify.sh all` fails if the Android entry is
+missing, but it cannot tell that the version is stale.
+
 ### Checksums (SEC-19)
 
 `generateChecksums` writes `sdk/build/local-repo/CHECKSUMS-SHA256.txt`. Publish its contents with

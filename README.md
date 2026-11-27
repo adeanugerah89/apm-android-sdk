@@ -68,6 +68,6 @@ blocks it was built to catch.
 
 ## Status
 
-Phase 1 and Phase 2 are complete. Distribution to the internal Maven repository and symbol upload
-are implemented and tested but not yet switched on — both are waiting on a repository URL and
-credentials, not on code. See `FEATURES.md`.
+Phase 1 and Phase 2 are complete, and `0.1.0` is published to GitHub Packages. Symbol upload is
+implemented but **not usable yet**: the backend's current symbol endpoint accepts only iOS Mach-O
+files, so Android symbolication waits on a backend contract (`FEATURES.md` A50). See `FEATURES.md`.
