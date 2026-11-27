@@ -33,7 +33,7 @@ jobs:
     # to every step — including third-party actions (checkout, Java and Gradle setup) and anything a build
     # or test script prints.
     env:
-      SYMBOLS_CONFIGURED: ${{ secrets.APM_SYMBOLS_URL != '' && secrets.APM_CI_TOKEN != '' }}
+      SYMBOLS_CONFIGURED: ${{ secrets.APM_SYMBOL_UPLOAD_URL != '' && secrets.APM_SYMBOL_UPLOAD_TOKEN != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -76,15 +76,15 @@ jobs:
       - name: Symbol upload (release gate)
         if: github.event_name == 'push' && env.SYMBOLS_CONFIGURED == 'true'
         env:
-          APM_SYMBOLS_URL: ${{ secrets.APM_SYMBOLS_URL }}
-          APM_CI_TOKEN: ${{ secrets.APM_CI_TOKEN }}
+          APM_SYMBOL_UPLOAD_URL: ${{ secrets.APM_SYMBOL_UPLOAD_URL }}
+          APM_SYMBOL_UPLOAD_TOKEN: ${{ secrets.APM_SYMBOL_UPLOAD_TOKEN }}
         run: ./gradlew :app:uploadSymbols
 
       - name: Warn that the symbol gate is not configured
         if: github.event_name == 'push' && env.SYMBOLS_CONFIGURED != 'true'
         run: |
           echo "::warning title=Symbol upload not configured::\
-          APM_SYMBOLS_URL / APM_CI_TOKEN are not set, so mapping.txt was not uploaded. \
+          APM_SYMBOL_UPLOAD_URL / APM_SYMBOL_UPLOAD_TOKEN are not set, so mapping.txt was not uploaded. \
           Crash reports from a release build of this app will be unreadable (01 section 8). \
           Add both as repository secrets to arm the gate."
 

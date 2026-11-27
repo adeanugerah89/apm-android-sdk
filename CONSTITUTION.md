@@ -1546,3 +1546,19 @@ half done; the code, tests and decisions stand as recorded on 2026-10-02/06.
   sends the whole ring buffer, so the ring buffer's own cap is the whole rule here.
 - **Not decided here:** whether `ConnectivityWatcher` (the sync trigger, A5) should share the callback; it stays separate.
 
+### 2026-11-27 · A19/A50: `mapping.txt` goes to the backend's one symbol endpoint, shared with iOS
+- **Decision:** `:app:uploadSymbols` sends `POST <base>/v1/apps/<app_id>/symbols?platform=android&version=<versionName>&build=<versionCode>`
+  with the raw `mapping.txt` as body and an upload token in `X-APM-Upload-Token` — the route and credential apm-backend
+  already serves for iOS dSYMs (feat-018), extended by apm-backend feat-029. The old `POST /v1/symbols` multipart with a
+  Bearer CI token was written from `01` §8 but never existed on any server; `01` §8 now describes the real endpoint.
+- **Settings use APMKit's names** (`APM_SYMBOL_UPLOAD_URL` = base URL, `APM_SYMBOL_UPLOAD_TOKEN`), so one runbook and one
+  `keyctl upload-token issue` serve both platforms. The renamed CI secrets had never been set, so nothing breaks.
+- **No placeholder release.** A mapping's identity is `(app_id, version, build)`; the old script defaulted a missing value
+  to `"unknown"`, which would store the file where no crash looks. A missing value now fails the task. `version`/`build`
+  must equal `ApmConfig.appVersion`/`appBuild` (INTEGRATION §4 says so).
+- **`Content-Length` + `Expect: 100-continue`.** Fixed-length streaming for the same gateway reason as A26. 100-continue
+  because `cmd/symbolupload` checks the token before reading the body: without it a refused token surfaced as a transport
+  error ("Error writing request body"); with it, `getOutputStream` fails with "Server rejected operation" and the response
+  code (401) is readable — both pieces are needed, checked against the real service.
+- **Not decided here:** retrace and its frame shape, which are apm-backend's (feat-029 second half).
+

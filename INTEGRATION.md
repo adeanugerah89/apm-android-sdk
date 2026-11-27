@@ -112,12 +112,10 @@ non-blocking and never throws; it does nothing before `APM.start()` succeeds.
 
 ## 4. Upload symbols from your CI — required for readable crashes
 
-> **Status (2026-11): the upload target is not settled.** `symbol-upload.gradle.kts` implements the
-> `mapping.txt` upload that `01` §8 specifies, but the backend's current symbol endpoint
-> (`POST /v1/apps/{id}/symbols`, `X-APM-Upload-Token`) accepts only an iOS Mach-O `__DWARF` file and
-> rejects anything else. Android symbolication is a separate, unstarted piece of work (`FEATURES.md` A50).
-> Until it lands, do not provision a symbols endpoint or CI token for this step; keep the `mapping.txt`
-> from each release build so it can be uploaded later.
+> **Status (2026-11-27): uploads work; readable frames do not yet.** The backend accepts and stores your
+> `mapping.txt` (apm-backend feat-029, upload half). Deobfuscating crash frames with it is the second half
+> and is not built yet, so Android frames still show R8 names for now. Upload anyway: every release you
+> upload now is readable as soon as retrace lands, and one you did not upload never will be.
 
 A release build is obfuscated by R8, so a crash arrives as `a.b.c(SourceFile:1)` unless the
 `mapping.txt` from *your* build is uploaded. The SDK is shrunk as part of your app, so this is your
@@ -125,19 +123,31 @@ mapping file, not the APM team's.
 
 ```kotlin
 // app/build.gradle.kts
-extra["apmSymbolsAppId"] = android.defaultConfig.applicationId
+extra["apmSymbolsAppId"] = "<your APM app id>"          // the same appId you pass to ApmConfig
 extra["apmSymbolsVersion"] = android.defaultConfig.versionName
 extra["apmSymbolsBuild"] = android.defaultConfig.versionCode.toString()
 apply(from = "<path to>/symbol-upload.gradle.kts")
 ```
 
 ```bash
-./gradlew :app:uploadSymbols -PapmSymbolsUrl=<symbols endpoint> -PapmCiToken="$APM_CI_TOKEN"
+./gradlew :app:uploadSymbols \
+  -PapmSymbolUploadUrl=<base URL of the symbol upload service> \
+  -PapmSymbolUploadToken="$APM_SYMBOL_UPLOAD_TOKEN"
 ```
+
+**`apmSymbolsVersion` and `apmSymbolsBuild` must be the same values you pass to `ApmConfig` as
+`appVersion` and `appBuild`.** A mapping file has no UUID, so the release is the only thing that ties
+a crash to its mapping; a mapping uploaded under another version or build matches no crash. The task
+refuses to run when any of the three is missing rather than upload under a placeholder.
+
+The token is an **upload token** issued per app by the APM team (apm-backend
+`keyctl upload-token issue --app=<id>`), separate from your app key; never use the app key here.
+Re-running the upload for the same build is safe (`already_present`); uploading a *different*
+mapping for a build that already has one fails with `409`, because crashes already read with the
+first mapping must keep reading the same.
 
 The task **fails the build** if the upload fails — deliberately (`01` §8). A release that ships
 without symbols produces crash reports nobody can read, and that is only discovered weeks later.
-The CI token is separate from your app key; never use the app key here.
 
 ---
 

@@ -193,17 +193,27 @@ is how a release ships without symbols.
 
 ```bash
 ./gradlew :app:uploadSymbols \
-  -PapmSymbolsUrl=https://ingest.internal.example.com/v1/symbols \
-  -PapmCiToken="$APM_CI_TOKEN"
+  -PapmSymbolUploadUrl=https://symbols.internal.example.com \
+  -PapmSymbolUploadToken="$APM_SYMBOL_UPLOAD_TOKEN"
 ```
 
-`APM_SYMBOLS_URL` and `APM_CI_TOKEN` work as environment variables, and CI reads them from repo
-secrets. The token is a **CI token, separate from the app key** (`01` §8) — the app key is an
-identifier embedded in the binary (SEC-13) and must never be used to authenticate a release.
+`APM_SYMBOL_UPLOAD_URL` and `APM_SYMBOL_UPLOAD_TOKEN` work as environment variables (the same names
+as APMKit's `scripts/upload-dsyms.sh`), and CI reads them from repo secrets. The token is an **upload
+token**, issued per app with apm-backend's `keyctl upload-token issue` and separate from the app key
+(`01` §8) — the app key is an identifier embedded in the binary (SEC-13) and must never be used to
+authenticate a release.
 
-What is uploaded is `mapping.txt` from the R8 release build, as `multipart/form-data` with
-`app_id`, `version`, `build` and `platform=android`. **R8 must be enabled** (`isMinifyEnabled =
-true`) or there is no mapping file and the task fails.
+The request is the backend's one symbol endpoint, shared with iOS (`01` §8, apm-backend feat-029):
+`POST <base>/v1/apps/<app_id>/symbols?platform=android&version=<versionName>&build=<versionCode>`,
+the raw `mapping.txt` as the body, the token in `X-APM-Upload-Token`, `Content-Length` set and
+`Expect: 100-continue` so a refused token is answered before the body is sent. **R8 must be enabled**
+(`isMinifyEnabled = true`) or there is no mapping file and the task fails. A missing app id, version or
+build also fails the task: a mapping stored under a placeholder release matches no crash.
+
+Checked end to end on 2026-11-27 against a real `cmd/symbolupload` and a database migrated with
+`migrate`: the verification app's 6.4 MB mapping was stored with its `pg_map_id`, a second run answered
+`already_present`, and a wrong token (`401`), a missing token, a different mapping for the same build
+(`409`) and an unreachable server each failed the build.
 
 ### The adopting app uploads its own symbols
 
