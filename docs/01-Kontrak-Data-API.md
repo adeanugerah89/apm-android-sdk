@@ -222,6 +222,13 @@ Konsekuensinya: input mentah yang sama (mis. nomor telepon yang sama) selalu men
 >
 > **Hanya apm-backend yang memakai definisi ini.** Pilot (`readapi.py`) tidak melihat `crash_type`: ia masih menghitung hang `unresolved` dan sesi yang hanya berisi hang sebagai crash. Itu satu-satunya perbedaan yang disengaja, dan dikunci di kedua sisi oleh tes paritas (bukan disembunyikan di allowlist).
 >
+> **Metrik freeze (2026-11-21, APMKit item 18 diputuskan; apm-backend feat-033).** Hang `unresolved` tetap bukan crash, tetapi sekarang dihitung oleh metriknya sendiri, **di samping** crash-free dan tidak pernah di dalamnya:
+>
+> - **freeze** = hang **dan** `hang_resolution = 'unresolved'`. Hang tanpa `hang_resolution` sama sekali bukan freeze (tidak ada yang bilang ia tidak pulih). `is_fatal` tidak menentukan.
+> - Overview (`current`, `previous`, `delta`) membawa **`freeze_free_sessions`** dan **`freeze_free_users`**: persentase sesi/user dalam jendela yang **tidak** punya satu pun event freeze. Penyebut, pembulatan (2 desimal), filter `real_users_only`, dan aturan `null` (penyebut 0 → `null`, bukan 100) sama persis dengan `crash_free_*`.
+> - Freeze bisa mencakup proses latar belakang yang diambil iOS tanpa terlihat user (SDK tidak bisa membedakannya dari watchdog-kill sungguhan), karena itu ia tidak dimasukkan ke crash-free. Saat membandingkan dengan Crashlytics, selisih crash-free sebesar sesi freeze ini memang disengaja.
+> - **Hanya apm-backend** yang mengirim field ini; pilot tidak punya konsep freeze (allowlist paritas `ModeSkip`). Backoffice menampilkan tile "Freeze-free sessions" dan memperlakukan field yang tidak ada sebagai `null` ("—").
+>
 > **`hang_resolution: "unresolved"` TIDAK berarti "tidak diketahui" — artinya hang ini tidak pernah terkonfirmasi pulih sebelum prosesnya mati.** KSCrash menandai laporan semacam ini `is_fatal: true` (lewat `WatchdogStitch.m`, di sisi SDK) karena ia tidak bisa membuktikan sebaliknya — proses itu sudah tidak ada untuk dimintai konfirmasi. Tapi "tidak terbukti pulih" bukan sinonim dari "crash sungguhan": kematian proses yang memicu kondisi ini bisa jadi crash nyata, atau bisa jadi semata app di-background lalu di-kill OS (jetsam/memory pressure) — kondisi yang sama sekali bukan crash yang dialami pengguna. **Keputusan SEMENTARA (2026-10-22, menunggu persetujuan item 18): hang `unresolved` TIDAK dihitung sebagai crash maupun sebagai kegagalan lain di mana pun** — ia hanya tampil sebagai hang (`hangs`). Konsekuensinya diterima secara sadar: crash-free sessions bisa terbaca lebih tinggi daripada pilot untuk app yang punya hang `unresolved`, sebesar persis sesi-sesi itu. **Usulan untuk item 18: metrik freeze terpisah** (rasio sesi dengan hang `unresolved`, ditampilkan di samping crash-free, tidak pernah di dalamnya). Pertanyaan produknya apa adanya tetap di `FEATURES.md` APMKit, item 18; item 18 adalah sumbernya, paragraf ini hanya merujuk ke nomor itu, bukan sebaliknya. **`hang_start_state`/`hang_start_perceptible` (di atas) adalah fakta yang keputusan itu kemungkinan besar akan dipakai** — lihat paragraf berikutnya untuk alasannya; `readapi.py` dan `overview.go` **belum membaca `hang_start_state`/`hang_start_perceptible`** sama sekali hari ini (yang dibaca overview.go hanya `crash_type`, untuk definisi crash di atas) (TAHAP 2 FEATURES.md item 18: SDK mengirim faktanya, server belum memutuskan apa-apa dari situ).
 >
 > **Arti "start": saat watchdog mendeteksi, bukan saat main thread sungguh macet.** KSCrash mencatat `hang_start_state`'s timestamp dari ping terjadwal terakhir (dekat dengan saat macetnya sungguh mulai), tapi transition-state-nya sendiri diambil pada TICK DETEKSI pertama (`watchdogTimerFired`, bisa tertunda hingga ambang 250ms, atau — pada skenario app disuspend lalu di-resume sebelum main thread sempat merespons ping — bisa jauh lebih lambat karena jam dinding terus berjalan selama suspend). Walau begitu, `hang_start_state` tetap field yang andal untuk "apakah pengguna pernah melihat app ini macet": `_transitionState` di KSCrash hanya berubah lewat notifikasi `UIApplication*` yang dikirim SYNCHRONOUS di main thread — kalau main thread benar-benar macet, notifikasi itu TIDAK BISA terkirim, jadi state-nya membeku di nilai terakhir yang sah sebelum macet. Hang yang dimulai `active` (pengguna melihatnya) tetap tercatat `active` walau app lalu dibackground paksa sambil masih macet; hang yang murni terjadi di background (termasuk artefak jam dari skenario suspend/resume di atas, karena notifikasi "masuk background" sudah terkirim sebelum suspend fisik terjadi) tercatat `background`. **Konsekuensinya: untuk satu hang yang sama, `hang_end_state` dalam PRAKTIK sama dengan `hang_start_state`** — karena state hanya bisa berubah lewat notifikasi main-thread, dan main thread yang sedang macet itulah yang seharusnya menjalankan notifikasi tersebut. **Ini TIDAK dijamin secara formal**: tidak ada pembuktian di sini yang menutup semua kasus, dan urutan antara notifikasi `WillEnterForeground` (dikirim main thread saat resume) dengan tick deteksi watchdog sendiri tidak disinkronkan oleh kode ini — ada celah (race), bukan kontradiksi atas mekanisme di atas, tapi juga bukan sesuatu yang dikendalikan SDK ini. `hang_end_state` tetap dikirim apa adanya (SDK tidak menyimpulkan ini, server yang nanti boleh), tapi jangan berharap ia membawa informasi baru di atas `hang_start_state`, dan jangan memperlakukan keduanya sebagai dijamin identik secara konstruksi.
@@ -530,11 +537,32 @@ Semua field baru bersifat aditif dan **hanya muncul bila berlaku** (kecuali `fin
 
 ---
 
-## 8. `POST /v1/symbols`
+## 8. `POST /v1/apps/{id}/symbols`
 
-Upload dari CI, **bukan dari device**. Autentikasi memakai token CI terpisah, bukan kunci app.
+Upload dari CI, **bukan dari device**. Satu endpoint untuk kedua platform (apm-backend `cmd/symbolupload`, feat-018 dan feat-029; route dan kredensial disatukan 2026-11-27, menggantikan bentuk lama `POST /v1/symbols` multipart yang tidak pernah diimplementasikan).
 
-**Multipart:** `app_id`, `version`, `build`, `platform`, dan file — dSYM zip (iOS) atau `mapping.txt` (Android).
+- **Autentikasi:** header `X-APM-Upload-Token`, token upload yang diterbitkan per app dengan `keyctl upload-token issue --app=<id>`. Terpisah dari kunci app (`X-APM-Key`, SEC-13) dan dari token baca; keduanya ditolak di sini. Token untuk app lain → `404`.
+- **Body:** file mentah (bukan multipart). Rilis dan platform ada di query string.
+
+| Platform | Query | Body | Identitas yang disimpan |
+|---|---|---|---|
+| iOS | tanpa `platform`, atau `platform=ios`; opsional `bundle_id`, `version`, `build`; header opsional `X-Symbol-UUID` | satu file DWARF Mach-O dari `<app>.dSYM/Contents/Resources/DWARF/<nama>` | `(app_id, uuid)` per slice arsitektur, dibaca dari `LC_UUID` file itu |
+| Android | `platform=android`, **wajib** `version` dan `build` (maks. 128 byte masing-masing) | `mapping.txt` dari build release R8 | `(app_id, version, build)`, plus `map_id` dari header `# pg_map_id:` bila ada |
+
+Untuk Android, `version` dan `build` **harus** sama dengan `app.version` / `app.build` yang dikirim event (`versionName` / `versionCode` yang diberikan ke `ApmConfig`), karena mapping tidak punya UUID: rilis itulah satu-satunya cara mencocokkan crash dengan mapping-nya.
+
+**Respons:**
+
+| Kode | Arti |
+|---|---|
+| `200` | `{"results":[…]}`, tiap hasil `status: "uploaded"` atau `"already_present"` (file yang sama persis sudah tersimpan: aman diulang dari CI) |
+| `400` | `not_dwarf_macho` / `uuid_mismatch` (iOS); `not_r8_mapping` / `missing_release` / `release_too_long` / `uuid_not_applicable` (Android); `unsupported_platform` |
+| `401` | Token tidak ada atau tidak dikenal |
+| `404` | Token sah, tetapi untuk app lain |
+| `409` | Identitas yang sama sudah punya file **lain** (`uuid_conflict` / `mapping_conflict`). File lama tidak pernah ditimpa diam-diam, karena crash yang sudah dibaca dengannya harus tetap terbaca sama |
+| `413` | Body melebihi 500 MB |
+
+> **Status Android (2026-11-27):** `mapping.txt` diterima dan disimpan, tetapi **belum dipakai** untuk men-deobfuscate frame. Retrace adalah separuh kedua feat-029 dan belum dikerjakan; sampai itu ada, frame Android di issue detail tetap nama hasil R8.
 
 > **Gate rilis:** pipeline CI harus **gagal** jika upload symbol gagal. Tanpa symbol, crash report tidak terbaca dan datanya praktis hilang — dan baru ketahuan berminggu-minggu kemudian saat ada yang mencoba membaca crash.
 
@@ -565,7 +593,7 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 | Endpoint | Fungsi |
 |---|---|
 | `GET /v1/apps` | Daftar app yang boleh diakses user |
-| `GET /v1/apps/{id}/overview` | Metrik ringkas + tren |
+| `GET /v1/apps/{id}/overview` | Metrik ringkas + tren. Termasuk `freeze_free_sessions`/`freeze_free_users` (hanya apm-backend, §4.3 "Metrik freeze"). |
 | `GET /v1/apps/{id}/issues` | Daftar issue (filter, sort, paginasi) |
 | `GET /v1/issues/{id}` | Detail issue + stack tersimbolikasi + sample event |
 | `GET /v1/issues/{id}/breadcrumbs` | Timeline breadcrumb untuk sample event |
@@ -580,7 +608,7 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 
 > **Filter device-integrity berlaku lintas endpoint.** Endpoint `overview`, `issues`, dan `network` menerima parameter filter `is_emulator`, `is_rooted`, `is_dev_mode` — termasuk opsi "kecualikan sesi non-real (emulator/debug)" untuk metrik headline (FE-22).
 
-> **`GET /v1/apps/{id}/users` — daftar user (apm-backend, 2026-10-21; `hangs` sejak 2026-10-22).** Parameter: `days` (default 7), `sort` = `crashes` \| `last_seen` \| `sessions` (menurun; kunci kedua `user_ref`), `real_users_only` (default `true`, sama dengan halaman lain), `limit` (default 25, maksimum 100) dan `cursor` (buram — pakai `next_cursor` dari respons sebelumnya apa adanya; cursor milik `sort` lain ditolak 400). Tidak pernah mengembalikan semua user sekaligus. Event tanpa `user_ref` bukan user dan tidak terdaftar. Tiap entri:
+> **`GET /v1/apps/{id}/users` — daftar user (apm-backend, 2026-10-21; `hangs` sejak 2026-10-22).** Parameter: `days` (default 7), `sort` = `crashes` \| `last_seen` \| `sessions` (menurun; kunci kedua `user_ref`), `real_users_only` (default `true`, sama dengan halaman lain), `limit` (default 25, maksimum 100) dan `cursor` (buram — pakai `next_cursor` dari respons sebelumnya apa adanya; cursor milik `sort` lain, app lain, atau endpoint lain ditolak `400 invalid_cursor` — apm-backend feat-026, 2026-11-21). Tidak pernah mengembalikan semua user sekaligus. Event tanpa `user_ref` bukan user dan tidak terdaftar. Tiap entri:
 >
 > | Field | Arti |
 > |---|---|
@@ -594,7 +622,7 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 >
 > **Outcome sesi pada `GET /v1/apps/{id}/users/{user_ref}`.** `crashed` bila ada ≥1 crash; bila tidak, `hang` bila ada ≥1 hang; bila tidak, `errors` bila ada error atau `network_failure`; selain itu `clean`. **Urutan: crashed > hang > errors > clean.** Sesi yang hanya berisi hang BUKAN `crashed` (pilot menyebutnya `crashed` — perbedaan yang disengaja, lihat §4.3). Breadcrumb sesi diambil dari event `crash`/`error` terakhirnya, jadi sesi `hang` membawa breadcrumb bila event hang-nya membawanya (§4.5.1).
 >
-> **`GET /v1/apps/{id}/issues/{issue_id}/users` — user yang terdampak satu issue (apm-backend, 2026-10-22).** Menjelaskan angka `users_affected` pada detail issue: daftar ini dibangun dari event yang SAMA dengan cara yang sama, jadi `total_users` selalu sama dengan `users_affected` untuk issue, jendela, dan mode grouping yang sama. Parameter: `days` (default **30**, 1..retensi — sama dengan detail issue), `limit` (default 25, maksimum 100) dan `cursor` (buram — pakai `next_cursor` dari respons sebelumnya apa adanya; cursor yang rusak atau milik urutan lain ditolak 400; `days`/`limit` di luar rentang juga 400). Urutan: `last_seen` menurun, kunci kedua `user_ref` menaik. Tidak pernah mengembalikan semua user sekaligus. Tiap entri:
+> **`GET /v1/apps/{id}/issues/{issue_id}/users` — user yang terdampak satu issue (apm-backend, 2026-10-22).** Menjelaskan angka `users_affected` pada detail issue: daftar ini dibangun dari event yang SAMA dengan cara yang sama, jadi `total_users` selalu sama dengan `users_affected` untuk issue, jendela, dan mode grouping yang sama. Parameter: `days` (default **30**, 1..retensi — sama dengan detail issue), `limit` (default 25, maksimum 100) dan `cursor` (buram — pakai `next_cursor` dari respons sebelumnya apa adanya; cursor yang rusak, milik urutan lain, issue lain, app lain, atau endpoint lain ditolak `400 invalid_cursor` — apm-backend feat-026, 2026-11-21; cursor terbitan sebelum tanggal itu ditolak sekali, mulai lagi dari halaman pertama; `days`/`limit` di luar rentang juga 400). Urutan: `last_seen` menurun, kunci kedua `user_ref` menaik. Tidak pernah mengembalikan semua user sekaligus. Tiap entri:
 >
 > | Field | Arti |
 > |---|---|
@@ -605,7 +633,7 @@ Autentikasi **terpisah** dari ingestion — sesi user / SSO, bukan `X-APM-Key`.
 >
 > Respons: `app_id`, `issue_id`, `window_days`, `limit`, `total_users`, `users`, `has_more`, `next_cursor`.
 >
-> - **Mengikuti saklar grouping.** Issue dikenali dengan fungsi yang sama dengan daftar issue dan detail, dalam mode `APM_READ_GROUPING_V2` pada permintaan itu (lihat §6.1). Id issue v2 tidak dikenal saat saklar mati, dan id v1 yang eventnya sudah pindah tidak dikenal saat saklar menyala: keduanya menjawab **`404 {"error":"not_found"}`**, seperti issue yang memang tidak ada. Endpoint ini tidak menjawab `issue_moved`.
+> - **Mengikuti saklar grouping.** Issue dikenali dengan fungsi yang sama dengan daftar issue dan detail, dalam mode `APM_READ_GROUPING_V2` pada permintaan itu (lihat §6.1). Id issue v2 tidak dikenal saat saklar mati: **`404 {"error":"not_found"}`**, seperti issue yang memang tidak ada. Id v1 yang semua eventnya sudah pindah ke issue v2 (saklar menyala) menjawab **sama persis dengan detail issue**: **`404 {"error":"issue_moved","moved_to":[{id,title,events}]}`**, dihitung dalam jendela `days` permintaan ini dan hanya untuk app di path (apm-backend feat-025, 2026-11-21; sebelumnya endpoint ini menjawab `not_found`).
 > - **Tidak membaca `real_users_only`** (dan filter device-integrity lain), sama seperti detail issue: angka yang dijelaskannya tidak difilter, jadi daftarnya pun tidak.
 > - **Event tanpa `user_ref`** dihitung untuk issue tetapi bukan user mana pun, persis seperti `users_affected` — mereka tidak muncul di daftar dan tidak masuk `total_users`.
 > - **Hanya ada di apm-backend.** Pilot (`apm-ingest/readapi.py`) tidak punya endpoint ini dan tidak ada oracle paritas; kebenarannya dijaga test yang menyamakan `total_users` dengan `users_affected`.
