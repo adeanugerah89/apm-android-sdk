@@ -78,8 +78,20 @@ internal class UserIdProvider(
     /** The identity epoch events are stamped with right now. */
     val currentEpoch: Int get() = epoch
 
-    /** MOB-28: app host sets an identifier — free-form string, never validated or rejected. */
-    fun setUser(id: String) = change(id)
+    /**
+     * MOB-28: app host sets an identifier — free-form string, not validated for content (SEC-06).
+     *
+     * The one exception (A54, `02` MOB-28/SEC-06): an empty or whitespace-only string is **ignored**,
+     * because it is not an identity — taking it would file everything under a blank `user_id`. Returns
+     * `false` when it was ignored; nothing changes then (no new epoch, nothing persisted). Anything else
+     * is taken exactly as given, **not trimmed**, and placeholders such as `"0"` or `"guest"` stay the
+     * host's responsibility.
+     */
+    fun setUser(id: String): Boolean {
+        if (id.isBlank()) return false
+        change(id)
+        return true
+    }
 
     /** The host signed the user out: events from now on are anonymous again, not attributed to the last user. */
     fun clearUser() = change(null)

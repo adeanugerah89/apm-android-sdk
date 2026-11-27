@@ -48,6 +48,17 @@ internal object FailureCategoryMapper {
     /** Prefix of the message OkHttp's `CertificatePinner` puts on a pin mismatch. */
     private const val PINNING_FAILURE_PREFIX = "Certificate pinning failure!"
 
+    /**
+     * For a failure reported by hand (A51), where the host's own stack may throw something that is not an
+     * `IOException`: an `IOException` is classified exactly as OkHttp's are; a `java.util.concurrent.CancellationException`
+     * (what coroutines and futures throw when cancelled) is `cancelled`; anything else is `unknown` — never guessed.
+     */
+    fun map(e: Throwable): FailureCategory = when (e) {
+        is IOException -> map(e)
+        is java.util.concurrent.CancellationException -> FailureCategory.CANCELLED
+        else -> FailureCategory.UNKNOWN
+    }
+
     fun map(e: IOException): FailureCategory = when {
         e is SSLPeerUnverifiedException && e.message?.startsWith(PINNING_FAILURE_PREFIX) == true ->
                                                  FailureCategory.SSL_PINNING_REJECTED

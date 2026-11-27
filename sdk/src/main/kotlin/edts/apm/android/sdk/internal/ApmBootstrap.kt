@@ -242,7 +242,10 @@ internal object ApmBootstrap {
             }
         )
 
-        val manualApi = ManualApi(queue, userIds, breadcrumbs, sequencer::next, volatileContext::current)
+        val manualApi = ManualApi(
+            queue, userIds, breadcrumbs, sequencer::next, volatileContext::current,
+            debugLog = { message -> if (debugLogging) android.util.Log.d("APM", message) }
+        )
 
         // ─── sync (A5) ──────────────────────────────────────────────────────
         val syncEngine = SyncEngine(
@@ -278,11 +281,11 @@ internal object ApmBootstrap {
             breadcrumbsProvider = breadcrumbs::snapshot
         ).install()
 
-        TerminationDetector(app, prefs).check()?.let { reason ->
+        TerminationDetector(app, prefs).detect()?.let { termination ->
             // Reported once at startup about the *previous* process; write it through before
             // anything else can evict it.
             stampedSyncQueue.enqueue(
-                buildTerminationEvent(reason, sequencer.next(), volatileContext.current())
+                buildTerminationEvent(termination.reason, sequencer.next(), volatileContext.current(), termination.eventId)
                     .copy(   // all null on a first launch: stamped with the current values instead
                         sessionId = previousSessionId,
                         appVersion = previousApp?.version, appBuild = previousApp?.build, osVersion = previousApp?.osVersion

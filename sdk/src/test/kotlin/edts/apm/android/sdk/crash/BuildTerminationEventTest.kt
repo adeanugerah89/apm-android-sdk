@@ -15,4 +15,11 @@ class BuildTerminationEventTest {
         assertEquals(5L, event.seq)
         assertEquals("memory_pressure", event.attrs.getValue("termination_reason").jsonPrimitive.content)
     }
+
+    @Test fun `uses the given event_id, and a random one when none is given (A52)`() {
+        assertEquals("fixed-id", buildTerminationEvent("memory_pressure", 1L, EventContext(), eventId = "fixed-id").eventId)
+        val a = buildTerminationEvent("memory_pressure", 1L, EventContext()).eventId
+        val b = buildTerminationEvent("memory_pressure", 1L, EventContext()).eventId
+        assertNotEquals(a, b)
+    }
 }

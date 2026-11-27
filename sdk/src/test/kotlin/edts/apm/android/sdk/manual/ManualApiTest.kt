@@ -116,6 +116,32 @@ class ManualApiTest {
         assertEquals(UserIdSource.HOST, userIdProvider.userIdSource)
     }
 
+    @Test fun `a blank setUser is ignored and reported to the debug hook without the value (A54)`() {
+        val logged = mutableListOf<String>()
+        val withHook = ManualApi(
+            queue = queue,
+            userIdProvider = userIdProvider,
+            breadcrumbs = breadcrumbs,
+            seqProvider = { 1L },
+            contextProvider = { EventContext() },
+            debugLog = { logged += it }
+        )
+        withHook.setUser("user-42")
+        withHook.setUser("   ")
+
+        assertEquals("user-42", userIdProvider.userId)           // the earlier user stays
+        assertEquals(1, logged.size)
+        assertFalse("SEC-06: the rejected value must not be echoed", logged.single().contains("user-42"))
+
+        withHook.setUser("user-43")                              // a valid id does not log
+        assertEquals(1, logged.size)
+    }
+
+    @Test fun `a blank setUser without a debug hook is a silent no-op (A54)`() {
+        api.setUser("")
+        assertEquals(UserIdSource.GENERATED, userIdProvider.userIdSource)
+    }
+
     @Test fun `breadcrumb delegates to the ring buffer (MOB-11)`() {
         api.breadcrumb("checkout_tapped", BreadcrumbCategory.USER_ACTION)
         assertTrue(breadcrumbs.snapshot().contains("checkout_tapped"))

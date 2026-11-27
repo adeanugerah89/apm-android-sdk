@@ -15,6 +15,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -91,6 +92,36 @@ class NativeCrashReporterTest {
         // The tombstone's own time, converted: not the raw "2026-09-09 11:14:38.641294490+0700".
         assertEquals("2026-09-09T04:14:38.641Z", event.tsClient)
         assertTrue(Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$""").matches(event.tsClient))
+    }
+
+    // ─── A52 · a report that is processed twice dedups at the backend ───────────
+
+    @Test fun `a native crash event_id is derived from the exit record, so a repeat carries the same id (A52)`() {
+        registerNativeCrash(tombstoneBytes(), pid = 4321, exitTimeMs = 1_788_000_000_000L)
+        reporter().reportPending()
+        val first = queue.events.single().eventId
+
+        // The watermark write is lost (killed between enqueue and marker, or a cleared state file).
+        context.getSharedPreferences("native-crash-test", Context.MODE_PRIVATE).edit().clear().commit()
+        // The trace stream was consumed by the first pass; the real system hands out a fresh one each time.
+        val am = context.getSystemService(ActivityManager::class.java)
+        am.getHistoricalProcessExitReasons(context.packageName, 0, 10).forEach {
+            Shadow.extract<ShadowApplicationExitInfo>(it).setTraceInputStream(ByteArrayInputStream(tombstoneBytes()))
+        }
+        reporter().reportPending()
+
+        assertEquals(2, queue.events.size)
+        assertEquals("the same crash re-sent must reuse its event_id", first, queue.events[1].eventId)
+        assertEquals(ReportEventId.forExit("crash", context.packageName, 4321, 1_788_000_000_000L), first)
+    }
+
+    @Test fun `two different native crashes get different event_ids (A52)`() {
+        registerNativeCrash(tombstoneBytes(), pid = 4321, exitTimeMs = 1_788_000_000_000L)
+        registerNativeCrash(tombstoneBytes(), pid = 4400, exitTimeMs = 1_788_000_100_000L)
+        reporter().reportPending()
+
+        assertEquals(2, queue.events.size)
+        assertNotEquals(queue.events[0].eventId, queue.events[1].eventId)
     }
 
     @Test fun `a native crash never carries the new process's breadcrumbs (A27)`() {

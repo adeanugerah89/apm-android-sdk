@@ -7,6 +7,7 @@ import edts.apm.android.sdk.breadcrumb.BreadcrumbLevel
 import edts.apm.android.sdk.internal.ApmBootstrap
 import edts.apm.android.sdk.internal.ApmRuntime
 import edts.apm.android.sdk.network.ApmEventListener
+import edts.apm.android.sdk.network.ManualNetworkReporter
 import okhttp3.EventListener
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
@@ -124,6 +125,47 @@ public object APM {
         )
     }
 
+    /**
+     * Report a network request made with a stack the SDK cannot observe on its own — `HttpURLConnection`,
+     * Cronet, Volley's default stack, Ktor on another engine, or an `OkHttpClient` you did not attach
+     * [networkEventListener] to. (A51, MOB-01; iOS: `reportNetworkTask`)
+     *
+     * Requests made through an `OkHttpClient` that **does** carry [networkEventListener] are captured
+     * automatically — do not also report those here, they would be counted twice.
+     *
+     * - Pass [statusCode] for a request that got a response. A status of 400 or above produces both a `network`
+     *   and a `network_failure` event, exactly as the automatic capture does.
+     * - Pass [error] (and no [statusCode]) for a request that failed before a response. It is classified as for
+     *   OkHttp: timeout, dns, TLS, cancelled, and so on.
+     * - [url] is the full URL; only its host and normalised path are kept. The query string, fragment and
+     *   credentials are discarded, and no header or body can be passed. A non-http(s) URL, or a call with
+     *   neither a status nor an error, records nothing.
+     * - Phase timings (DNS, TCP, TLS, time-to-first-byte) are not recorded — a stack of your own does not expose
+     *   them to the SDK.
+     *
+     * Safe to call from any thread; it never blocks and never throws. A no-op before [start] succeeds.
+     */
+    @JvmStatic
+    @JvmOverloads
+    public fun reportNetworkRequest(
+        url: String,
+        method: String,
+        durationMs: Long,
+        statusCode: Int? = null,
+        error: Throwable? = null,
+        requestBytes: Long? = null,
+        responseBytes: Long? = null
+    ) {
+        safely { components ->
+            ManualNetworkReporter(
+                queue = components.queue,
+                seqProvider = { components.sequencer() },
+                contextProvider = { components.eventContext() },
+                ingestHost = lastIngestHost
+            ).report(url, method, durationMs, statusCode, error, requestBytes, responseBytes)
+        }
+    }
+
     /** Report a handled error, with call-site location filled automatically. (MOB-11b) */
     @JvmStatic
     @JvmOverloads
@@ -131,7 +173,13 @@ public object APM {
         safely { it.manualApi.logError(throwable, extra) }
     }
 
-    /** Set the user identifier. Sent raw over TLS; the SDK never hashes it. (MOB-28, SEC-06) */
+    /**
+     * Set the user identifier. Sent raw over TLS; the SDK never hashes it. (MOB-28, SEC-06)
+     *
+     * An empty or whitespace-only [id] is **ignored** — it is not an identity, and the previous user (or the
+     * generated id) stays in place. Call this after login and when a saved session is restored; do not call it
+     * with a placeholder such as `"0"` or `"guest"` for "not signed in" — use [clearUser] on logout instead.
+     */
     @JvmStatic
     public fun setUser(id: String) {
         safely { it.manualApi.setUser(id) }

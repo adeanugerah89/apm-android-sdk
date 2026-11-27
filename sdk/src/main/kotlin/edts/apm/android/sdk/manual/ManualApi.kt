@@ -31,10 +31,23 @@ internal class ManualApi(
     private val userIdProvider: UserIdProvider,
     private val breadcrumbs: BreadcrumbRingBuffer,
     private val seqProvider: () -> Long,
-    private val contextProvider: () -> EventContext
+    private val contextProvider: () -> EventContext,
+    /**
+     * Debug-build log hook (A54). Wired by `ApmBootstrap` only when debug logging is on; it is handed a
+     * fixed message and **never the rejected value** (SEC-06).
+     */
+    private val debugLog: ((String) -> Unit)? = null
 ) {
-    /** MOB-28 */
-    fun setUser(id: String) = userIdProvider.setUser(id)
+    /** MOB-28. A blank id is ignored (A54) and, in a debug build, noted in the log. */
+    fun setUser(id: String) {
+        if (!userIdProvider.setUser(id)) {
+            try {
+                debugLog?.invoke("setUser ignored: the id is empty or whitespace-only")
+            } catch (e: Throwable) {
+                // A log hook must never be able to fail the host's call.
+            }
+        }
+    }
 
     /** A41/A39: the host signed the user out. */
     fun clearUser() = userIdProvider.clearUser()

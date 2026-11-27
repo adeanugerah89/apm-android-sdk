@@ -78,6 +78,11 @@ Attached to every event.
 | `failure_category`, `tls_phase_reached` | Failure classification |
 | `error_domain`, `error_code`, `underlying_domain`, `underlying_code` | The failing exception's **class name** (e.g. `java.net.UnknownHostException`) and the OS `errno` when one was reported (`0` = none). Class names of platform exceptions only identify the kind of failure; the exception **message** is never sent |
 
+These events come from the OkHttp listener, or from `APM.reportNetworkRequest` for stacks the listener cannot see
+(A51). The manual call builds the same events from a URL, method, duration, status or error and optional byte counts; it
+keeps only the host and the normalised path, **discards the query string, fragment and any credentials in the URL**, and
+omits the timing fields, `protocol`, `tls_version` and `reused_connection`. It adds no new field to the inventory.
+
 **Request and response bodies are never captured, and there is no option to enable it** (SEC-04).
 **No headers are captured** — `Authorization` and `Cookie` cannot leak because no header is recorded
 at all. Query strings are not stored.

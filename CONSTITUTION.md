@@ -1496,3 +1496,34 @@ half done; the code, tests and decisions stand as recorded on 2026-10-02/06.
   reinstall removes that history with the package, so this is a test-procedure effect; it is the same lost-marker
   window that A52 would absorb with a deterministic `event_id`.
 
+
+### 2026-11-27 · A52: native-crash and termination `event_id` are derived from the exit record
+- **Decision:** `event_id` of a native `crash` and of a `termination` is a SHA-256-derived, UUID-v4-shaped value over
+  `(kind, package, pid, exit timestamp)` (`ReportEventId`), so the same exit sent twice carries the same id and the
+  backend's 7-day dedup (`01` §3/§7) absorbs it. Everything else keeps a random UUID.
+- **Why the timestamp is in the key:** a recycled pid at a different time is a different process life and must not be
+  deduped away. `ExitInfo` gained `timestamp`; `TerminationDetector.detect()` returns the id with the reason.
+- **Why not JVM crashes:** the dying process writes one event once, synchronously; nothing ever looks at it a second
+  time, so there is no duplicate to absorb.
+- **Not a contract requirement for Android** — the local marker (exit timestamp / pid) still does the primary dedup;
+  this closes the window where its write is lost (killed between enqueue and marker, or a cleared state file — the
+  `pm clear` effect observed 2026-11-12). Lower-case, 36 characters; the backend must not reject by case or version.
+
+### 2026-11-27 · A51: `APM.reportNetworkRequest` — a manual path for stacks the OkHttp listener cannot see
+- **Decision:** a public `APM.reportNetworkRequest(url, method, durationMs, statusCode?, error?, requestBytes?, responseBytes?)`
+  built on the same `NetworkEventAttrs` the listener now uses, so a hand-reported request cannot be shaped differently
+  from an automatic one (iOS routes both paths through `NetworkEventBuilder` for the same reason). 400+ yields `network`
+  **and** `network_failure(http_error)` (MOB-02b); a failure is classified with `FailureCategoryMapper`, which gained a
+  `Throwable` overload (`IOException` as before, `CancellationException` → `cancelled`, anything else → `unknown`).
+- **Built without the product answer A51 asked for** ("does any Android adopter use a stack that is not OkHttp?") — on
+  the owner's instruction. `02` §3.1b is iOS-only, so this is **not** a spec requirement for Android; the API surface is
+  this SDK's own design and can be reshaped before anyone depends on it.
+- **Privacy (SEC-03/SEC-04):** only the host and the SEC-03b-normalised path are kept; query, fragment and `user:pass@`
+  are discarded before anything is built, and no header or body is a parameter. The ingest host is never reported (MOB-10).
+- **No de-duplication against the listener**, unlike iOS (which has `InstrumentedTaskRegistry`): OkHttp's `Call` carries no
+  handle the manual call could be matched against. A request reported here **and** captured by an attached listener is
+  counted twice; `INTEGRATION.md` and the KDoc say so. Phase timings, `protocol`, `tls_version`, `reused_connection` are
+  omitted — optional attributes a host's own stack does not expose.
+- **Test-environment note:** with Proxyman's system proxy (127.0.0.1:9090) on, the JBR's default `ProxySelector` routes the
+  test JVM through it and `NetworkEventAttrsTest` "a DNS failure…" fails ("a reserved name must not resolve") — unrelated
+  to the SDK. `JAVA_TOOL_OPTIONS=-Dhttp.nonProxyHosts=*` bypasses it for a run without touching the system setting.

@@ -16,7 +16,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
-import java.util.UUID
 
 /**
  * Reports native crashes from the previous process at the next launch (MOB-15 native, MOB-16).
@@ -135,7 +134,9 @@ internal class NativeCrashReporter(
 
         return queue.enqueue(
             Event(
-                eventId = UUID.randomUUID().toString(),
+                // A52: derived from the exit record, so this crash sent twice (a lost watermark write) is one
+                // event at the backend, not two.
+                eventId = ReportEventId.forExit("crash", context.packageName, info.pid, info.timestamp),
                 type = EventType.CRASH,
                 // The tombstone's own crash time. This is reported at the next launch, and stamping
                 // it with the launch time would place every native crash at the wrong moment.

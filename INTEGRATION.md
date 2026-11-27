@@ -90,7 +90,25 @@ it. Without it there is no network telemetry at all — everything else still wo
 The listener excludes your ingest host from capture, so the SDK cannot record its own uploads.
 
 **If you use Retrofit**, attach it to the `OkHttpClient` you hand to `Retrofit.Builder().client(…)`.
-**If you use a different HTTP stack**, there is no network capture today; tell the APM team.
+
+**Only an `OkHttpClient` that carries the listener is captured.** That covers everything built on it (Retrofit,
+Coil, Glide, Ktor with the OkHttp engine) — but not a second `OkHttpClient` you forgot to attach it to, nor
+`HttpURLConnection`, Cronet, Volley's default stack or Ktor on another engine.
+
+**For those, report the request yourself** once it finishes:
+
+```kotlin
+// A response arrived (any status; 400+ is also recorded as a failure, as with OkHttp):
+APM.reportNetworkRequest(url = url, method = "GET", durationMs = elapsedMs, statusCode = 200)
+// No response (timeout, DNS, TLS, cancelled, ...):
+APM.reportNetworkRequest(url = url, method = "GET", durationMs = elapsedMs, error = throwable)
+```
+
+It produces the same `network` / `network_failure` events as the listener. Only the host and the normalised path
+are kept — the query string, fragment and credentials in `url` are discarded, and no header or body can be passed.
+DNS/TCP/TLS/first-byte timings are not recorded (your stack does not expose them to the SDK). **Do not report a
+request that already went through an instrumented `OkHttpClient`** — it would be counted twice. Reporting is
+non-blocking and never throws; it does nothing before `APM.start()` succeeds.
 
 ## 4. Upload symbols from your CI — required for readable crashes
 

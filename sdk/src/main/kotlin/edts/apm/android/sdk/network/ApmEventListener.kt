@@ -162,62 +162,26 @@ internal class ApmEventListener(
         durationMs: Long, dnsMs: Long?, tcpMs: Long?, tlsMs: Long?, ttfbMs: Long?,
         protocol: Protocol?, reqBytes: Long?, resBytes: Long?,
         tlsVersion: String?, reusedConnection: Boolean
-    ) {
-        val attrs = buildJsonObject {
-            put("host", host)
-            put("path", path)
-            put("method", method)
-            put("status_code", status)
-            put("duration_ms", durationMs)
-            dnsMs?.let  { put("dns_ms",  it) }
-            tcpMs?.let  { put("tcp_ms",  it) }
-            tlsMs?.let  { put("tls_ms",  it) }
-            ttfbMs?.let { put("ttfb_ms", it) }
-            protocol?.let { put("protocol", it.toString()) }
-            reqBytes?.takeIf { it >= 0 }?.let { put("req_bytes", it) }
-            resBytes?.takeIf { it >= 0 }?.let { put("res_bytes", it) }
-            tlsVersion?.let { put("tls_version", it) }
-            put("reused_connection", reusedConnection)
-        }
-        enqueueEvent(EventType.NETWORK, attrs)
-    }
+    ) = enqueueEvent(
+        EventType.NETWORK,
+        NetworkEventAttrs.network(
+            host, path, method, status, durationMs, dnsMs, tcpMs, tlsMs, ttfbMs,
+            protocol?.toString(), reqBytes, resBytes, tlsVersion, reusedConnection
+        )
+    )
 
     private fun emitNetworkFailureHttpError(
         host: String, path: String, method: String, status: Int, durationMs: Long
-    ) {
-        val attrs = buildJsonObject {
-            put("host", host)
-            put("path", path)
-            put("method", method)
-            put("failure_category", "http_error")
-            put("status_code", status)
-            put("duration_ms", durationMs)
-        }
-        enqueueEvent(EventType.NETWORK_FAILURE, attrs)
-    }
+    ) = enqueueEvent(EventType.NETWORK_FAILURE, NetworkEventAttrs.httpError(host, path, method, status, durationMs))
 
     private fun emitTransportFailure(
         host: String, path: String, method: String,
         category: FailureCategory, durationMs: Long,
         error: IOException, tlsPhase: String?
-    ) {
-        val attrs = buildJsonObject {
-            put("host", host)
-            put("path", path)
-            put("method", method)
-            put("failure_category", Json.encodeToString(FailureCategory.serializer(), category).trim('"'))
-            put("duration_ms", durationMs)
-            val info = TransportError.of(error)
-            put("error_domain", info.domain)
-            put("error_code", info.code)
-            TransportError.underlyingOf(error)?.let {
-                put("underlying_domain", it.domain)
-                put("underlying_code", it.code)
-            }
-            tlsPhase?.let { put("tls_phase_reached", it) }
-        }
-        enqueueEvent(EventType.NETWORK_FAILURE, attrs)
-    }
+    ) = enqueueEvent(
+        EventType.NETWORK_FAILURE,
+        NetworkEventAttrs.transportFailure(host, path, method, category, durationMs, error, tlsPhase)
+    )
 
     private fun enqueueEvent(type: EventType, attrs: JsonObject) {
         val event = Event(

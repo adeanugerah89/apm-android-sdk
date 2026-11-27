@@ -85,4 +85,23 @@ class TerminationDetectorTest {
         )
         assertNull(detector.check())
     }
+
+    // ─── A52 ────────────────────────────────────────────────────────────────
+
+    @Test @Config(sdk = [30]) fun `detect carries an event_id derived from the exit, stable across repeats (A52)`() {
+        val fetch = { ExitInfo(pid = 555, reason = ApplicationExitInfo.REASON_LOW_MEMORY, timestamp = 1_788_000_000_000L) }
+        val first = TerminationDetector(context, prefs("td_a52_1"), fetch).detect()!!
+        // A cleared state file: the same exit is seen again.
+        val again = TerminationDetector(context, prefs("td_a52_2"), fetch).detect()!!
+
+        assertEquals("memory_pressure", first.reason)
+        assertEquals(first.eventId, again.eventId)
+        assertEquals(ReportEventId.forExit("termination", context.packageName, 555, 1_788_000_000_000L), first.eventId)
+    }
+
+    @Test @Config(sdk = [30]) fun `a recycled pid at another time is a different termination (A52)`() {
+        val a = TerminationDetector(context, prefs("td_a52_3")) { ExitInfo(7, ApplicationExitInfo.REASON_LOW_MEMORY, 1_000L) }.detect()!!
+        val b = TerminationDetector(context, prefs("td_a52_4")) { ExitInfo(7, ApplicationExitInfo.REASON_LOW_MEMORY, 2_000L) }.detect()!!
+        assertNotEquals(a.eventId, b.eventId)
+    }
 }

@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.work.Configuration
 import androidx.work.testing.WorkManagerTestInitHelper
 import edts.apm.android.sdk.breadcrumb.BreadcrumbCategory
+import edts.apm.android.sdk.core.EventType
 import edts.apm.android.sdk.internal.ApmRuntime
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
@@ -62,6 +63,7 @@ class ApmPublicApiTest {
         APM.clearUser()
         APM.breadcrumb("hello", BreadcrumbCategory.NAVIGATION)
         assertNull(APM.networkEventListener())
+        APM.reportNetworkRequest("https://api.example.com/x", "GET", 10, statusCode = 200)   // A51
         // No exception is the assertion.
     }
 
@@ -83,6 +85,25 @@ class ApmPublicApiTest {
         assertTrue(ApmRuntime.current!!.awaitCaptureDrain(5_000))
 
         assertEquals(1, ApmRuntime.current!!.queue.stats().eventCount)
+    }
+
+    @Test fun `reportNetworkRequest reaches the queue through the assembled graph, and never the ingest host (A51)`() {
+        APM.start(app, config()); APM.awaitStarted(10_000)
+
+        APM.reportNetworkRequest("https://api.example.com/v1/orders?token=SECRET", "get", 55, statusCode = 500)
+        APM.reportNetworkRequest("https://ingest.example.com/v1/ingest", "POST", 5, statusCode = 200)   // the SDK's own host
+        APM.reportNetworkRequest("https://api.example.com/v1/slow", "GET", 9_000, error = java.net.SocketTimeoutException("t"))
+        assertTrue(ApmRuntime.current!!.awaitCaptureDrain(5_000))
+
+        // Ordered by `seq`, not by `peek()`: the disk queue's order is not guaranteed for files written in the
+        // same millisecond, and this test is about what was captured, not about queue ordering.
+        val events = ApmRuntime.current!!.queue.peek(10).map { it.event }.sortedBy { it.seq }
+        assertEquals(
+            listOf(EventType.NETWORK, EventType.NETWORK_FAILURE, EventType.NETWORK_FAILURE),
+            events.map { it.type }
+        )
+        assertEquals("timeout", events[2].attrs.getValue("failure_category").jsonPrimitive.content)
+        assertFalse("SEC-03: the query never reaches the queue", events.joinToString { it.attrs.toString() }.contains("SECRET"))
     }
 
     @Test fun `setUser reaches the graph and flips user_id_source to host`() {
@@ -194,6 +215,11 @@ class ApmPublicApiTest {
         val termination = ApmRuntime.current!!.queue.peek(10).map { it.event }
             .single { it.type == edts.apm.android.sdk.core.EventType.TERMINATION }
         assertEquals("session-of-previous-process", termination.sessionId)
+        // A52: its event_id comes from the exit record (the shadow leaves the exit time at 0), not from a fresh UUID.
+        assertEquals(
+            edts.apm.android.sdk.crash.ReportEventId.forExit("termination", app.packageName, 777, 0L),
+            termination.eventId
+        )
         // A39: filed under the app version that was running, not the one installed now (config() says 1.0 / 100).
         assertEquals(Triple("0.9", "90", "12"), Triple(termination.appVersion, termination.appBuild, termination.osVersion))
         // A39: and under the user who was signed in when that process died — not whoever opens the app next.

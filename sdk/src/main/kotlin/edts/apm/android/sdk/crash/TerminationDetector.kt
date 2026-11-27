@@ -16,7 +16,10 @@ import java.util.UUID
 /** The two fields of `ApplicationExitInfo` this detector actually needs — a seam so tests can
  * supply fake exit data directly instead of constructing a real `ApplicationExitInfo` (which
  * has no public constructor and, as of Robolectric 4.13, a broken shadow for doing so). */
-internal data class ExitInfo(val pid: Int, val reason: Int)
+internal data class ExitInfo(val pid: Int, val reason: Int, val timestamp: Long = 0L)
+
+/** A detected termination: the mapped [reason] and the [eventId] derived from the exit it came from (A52). */
+internal data class DetectedTermination(val reason: String, val eventId: String)
 
 /**
  * MOB-15b / `01` §4.7 — checked once per launch (A16 calls [check] during `APM.start()`).
@@ -34,19 +37,26 @@ internal class TerminationDetector(
     private val fetchLatestExit: () -> ExitInfo? = { defaultFetchLatestExit(context) }
 ) {
     /** Never throws (CONSTITUTION rule #1). Returns null if there's nothing new/mappable to report. */
-    fun check(): String? = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) checkInternal() else null
+    fun check(): String? = detect()?.reason
+
+    /** [check] plus the deterministic `event_id` for the event to build (A52). Never throws. */
+    fun detect(): DetectedTermination? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) detectInternal() else null
     } catch (e: Exception) {
         null
     }
 
-    private fun checkInternal(): String? {
+    private fun detectInternal(): DetectedTermination? {
         val latest = fetchLatestExit() ?: return null
 
         if (latest.pid == prefs.getInt(KEY_LAST_REPORTED_PID, NO_PID)) return null  // already handled
         prefs.edit().putInt(KEY_LAST_REPORTED_PID, latest.pid).apply()
 
-        return TerminationReasonMapper.map(latest.reason)
+        val reason = TerminationReasonMapper.map(latest.reason) ?: return null
+        return DetectedTermination(
+            reason = reason,
+            eventId = ReportEventId.forExit("termination", context.packageName, latest.pid, latest.timestamp)
+        )
     }
 
     companion object {
@@ -63,14 +73,20 @@ internal class TerminationDetector(
         private fun realFetchLatestExit(context: Context): ExitInfo? {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
             val latest = am.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull() ?: return null
-            return ExitInfo(pid = latest.pid, reason = latest.reason)
+            return ExitInfo(pid = latest.pid, reason = latest.reason, timestamp = latest.timestamp)
         }
     }
 }
 
 /** Pure — build the `termination` event once a mapped [reason] is known. */
-internal fun buildTerminationEvent(reason: String, seq: Long, ctx: EventContext): Event = Event(
-    eventId = UUID.randomUUID().toString(),
+internal fun buildTerminationEvent(
+    reason: String,
+    seq: Long,
+    ctx: EventContext,
+    /** Derived from the exit record (A52); random only when a caller has no exit to derive it from. */
+    eventId: String = UUID.randomUUID().toString()
+): Event = Event(
+    eventId = eventId,
     type = EventType.TERMINATION,
     tsClient = Clock.nowIso8601(),
     seq = seq,
